@@ -2,6 +2,8 @@
 // File: validation.js
 // Validation service for data completeness checks
 
+/* global harperCluster, tables */
+
 import { BigQueryClient } from './bigquery-client.js';
 
 export class ValidationService {

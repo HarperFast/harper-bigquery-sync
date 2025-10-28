@@ -2,8 +2,10 @@
 // File: sync-engine.js
 // Core synchronization engine with modulo-based partitioning
 
+/* global config, harperCluster, tables */
+
 import { BigQueryClient } from './bigquery-client.js';
-import { createHash } from 'crypto';
+import { createHash } from 'node:crypto';
 
 export class BigQuerySync {
   constructor() {

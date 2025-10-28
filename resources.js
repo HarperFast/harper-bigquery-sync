@@ -7,6 +7,8 @@
 // File: resources.js
 // Component entry point with resource definitions
 
+/* global tables, Resource */
+
 import { BigQuerySync } from './src/sync-engine.js';
 import { ValidationService } from './src/validation.js';
 
