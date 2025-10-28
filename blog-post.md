@@ -159,25 +159,28 @@ function calculateBatchSize(lag) {
 
 ## Architecture Overview
 
-```
-                 ┌──────────────────┐
-                 │  Google BigQuery │
-                 └───┬─────┬────┬───┘
-                     │     │    │
-         Pull (mod 0)│     │    │Pull (mod 2)
-                     │     │Pull (mod 1)
-              ┌──────▼─┐ ┌─▼───────┐ ┌─▼──────┐
-              │ Node 0 │◄┤ Node 1  │◄┤ Node 2 │
-              │Ingest  │ │ Ingest  │ │ Ingest │
-              │+ Data  │ │ + Data  │ │ + Data │
-              └────────┘ └─────────┘ └────────┘
-                   ◄──── Replication ────►
+```mermaid
+graph TB
+    BQ[Google BigQuery<br/>Global Device Data]
+
+    BQ -->|Pull records<br/>MOD hash = 0| N0[Node 0<br/>Ingest + Data]
+    BQ -->|Pull records<br/>MOD hash = 1| N1[Node 1<br/>Ingest + Data]
+    BQ -->|Pull records<br/>MOD hash = 2| N2[Node 2<br/>Ingest + Data]
+
+    N0 <-->|Native Replication| N1
+    N1 <-->|Native Replication| N2
+    N2 <-->|Native Replication| N0
+
+    style BQ fill:#4285f4,stroke:#1967d2,stroke-width:2px,color:#fff
+    style N0 fill:#34a853,stroke:#188038,stroke-width:2px,color:#fff
+    style N1 fill:#34a853,stroke:#188038,stroke-width:2px,color:#fff
+    style N2 fill:#34a853,stroke:#188038,stroke-width:2px,color:#fff
 ```
 
 **Each node independently:**
 - Discovers cluster topology
 - Calculates its partition
-- Polls BigQuery
+- Polls BigQuery for its partition only
 - Writes locally
 - Relies on Harper's native replication
 

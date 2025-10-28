@@ -69,8 +69,12 @@ export class BigQuerySync {
     try {
       return await tables.SyncCheckpoint.get(this.nodeId);
     } catch (error) {
-      // No checkpoint exists yet
-      return null;
+      // If checkpoint not found, return null; otherwise log and rethrow so callers can handle it.
+      if (error && (error.code === 'NOT_FOUND' || /not\s*found/i.test(error.message || ''))) {
+        return null;
+      }
+      console.error('Error loading checkpoint:', error);
+      throw error;
     }
   }
   
@@ -205,7 +209,7 @@ export class BigQuerySync {
   }
   
   async updateCheckpoint(records) {
-    const lastRecord = records[records.length - 1];
+    const lastRecord = records.at(-1);
     
     this.lastCheckpoint = {
       nodeId: this.nodeId,

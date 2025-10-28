@@ -207,40 +207,30 @@ This means initial sync is fast (large batches), and steady-state is efficient (
 
 Here's what the final system looks like:
 
-```
-                    ┌──────────────────────┐
-                    │   Google BigQuery    │
-                    │                      │
-                    │  Global Device Data  │
-                    └────┬─────────┬───────┘
-                         │         │
-              ┌──────────┘         └──────────┐
-              │                                │
-              │ Pull (mod 0)        Pull (mod 1)  Pull (mod 2)
-              │                                │
-         ┌────▼────┐                     ┌────▼────┐
-         │ Node 0  │ ◄──────────────────►│ Node 1  │ ◄─────────┐
-         │ Ingest  │    Replication      │ Ingest  │            │
-         │ + Data  │                     │ + Data  │            │
-         └─────────┘                     └─────────┘            │
-              ▲                                ▲                │
-              │          Replication           │     Replication│
-              │                                │                │
-              └────────────────┬───────────────┘                │
-                               │                                │
-                          ┌────▼────┐                           │
-                          │ Node 2  │ ◄─────────────────────────┘
-                          │ Ingest  │
-                          │ + Data  │
-                          └─────────┘
+```mermaid
+graph TB
+    BQ[Google BigQuery<br/>Global Device Data]
+
+    BQ -->|Pull records<br/>MOD hash = 0| N0[Node 0<br/>Ingest + Data]
+    BQ -->|Pull records<br/>MOD hash = 1| N1[Node 1<br/>Ingest + Data]
+    BQ -->|Pull records<br/>MOD hash = 2| N2[Node 2<br/>Ingest + Data]
+
+    N0 <-->|Native Replication| N1
+    N1 <-->|Native Replication| N2
+    N2 <-->|Native Replication| N0
+
+    style BQ fill:#4285f4,stroke:#1967d2,stroke-width:2px,color:#fff
+    style N0 fill:#34a853,stroke:#188038,stroke-width:2px,color:#fff
+    style N1 fill:#34a853,stroke:#188038,stroke-width:2px,color:#fff
+    style N2 fill:#34a853,stroke:#188038,stroke-width:2px,color:#fff
 ```
 
-Each node:
+**Each node independently:**
 - Discovers cluster topology
 - Calculates which partition it owns
-- Polls BigQuery independently
-- Writes locally
-- Relies on Harper replication for consistency
+- Polls BigQuery for its partition only
+- Writes data locally
+- Relies on Harper's native replication for consistency
 
 ---
 
