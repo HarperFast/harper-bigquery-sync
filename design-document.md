@@ -335,11 +335,31 @@ Not needed yet, but on the roadmap if dynamic scaling becomes essential.
 
 ## Validation and Monitoring
 
-### Continuous Validation
+### Validation Evolution: V1 to V2
 
-**Note:** Harper's `count()` returns estimates with large, inconsistent ranges. Count-based validation is unreliable.
+**V1 Approach: Count-Based Validation (Initial Implementation)**
 
-Instead, validation uses three complementary approaches:
+The original validation compared record counts between BigQuery and Harper:
+
+```javascript
+const bqCount = await bigquery.query('SELECT COUNT(*) FROM table WHERE partition = @nodeId');
+const harperCount = await harper.count('table');
+const delta = Math.abs(bqCount - harperCount);
+const status = delta < 100 ? 'ok' : 'drift';
+```
+
+**Why V1 Failed:**
+
+1. **Eventual consistency:** Harper uses an eventually consistent model. Counts on a single node don't reflect cluster-wide state immediately after writes.
+2. **Count estimates:** Harper's `count()` returns estimates optimized for performance, not precision. The estimate range can be large and varies between requests.
+3. **Replication lag:** Records written locally may not be replicated to all nodes instantly, causing temporary count discrepancies.
+4. **False positives:** Validation would fire alerts during normal operation due to estimate variance, not actual data loss.
+
+**V2 Approach: Progress & Spot-Check Validation (Current)**
+
+Instead of comparing estimates, validate what matters: is ingestion progressing and are records actually present?
+
+Three complementary approaches:
 
 **1. Checkpoint Progress Monitoring**
 ```javascript

@@ -260,9 +260,20 @@ Quarterly capacity planning replaces frequent topology changes.
 
 ## Validation & Monitoring
 
-**Challenge:** Harper's `count()` returns estimates with inconsistent ranges—unreliable for validation.
+### The Count Validation Problem
 
-**Solution:** Three-pronged validation without counts:
+**Initial approach (V1):** Compare BigQuery counts with Harper counts every 5 minutes.
+
+**Why it failed:**
+- **Eventual consistency:** Harper is eventually consistent—counts don't reflect cluster state immediately
+- **Estimate variance:** `count()` returns performance-optimized estimates with large, inconsistent ranges
+- **False positives:** Alerts fired during normal operation, not actual data loss
+
+**Lesson:** Don't validate eventual consistency systems with point-in-time counts.
+
+### Current Approach (V2)
+
+**Three-pronged validation without counts:**
 
 **1. Progress monitoring** — Alert if checkpoints stop updating (10+ min)
 
