@@ -55,17 +55,44 @@ export class BigQueryClient {
       SELECT COUNT(*) as count
       FROM \`${this.dataset}.${this.table}\`
       WHERE MOD(
-        ABS(FARM_FINGERPRINT(CAST(${this.timestampColumn} AS STRING))), 
+        ABS(FARM_FINGERPRINT(CAST(${this.timestampColumn} AS STRING))),
         @clusterSize
       ) = @nodeId
     `;
-    
+
     const options = {
       query,
       params: { clusterSize, nodeId }
     };
-    
+
     const [rows] = await this.client.query(options);
     return rows[0].count;
+  }
+
+  async verifyRecord(record) {
+    // Verify a specific record exists in BigQuery by timestamp and device_id
+    const query = `
+      SELECT 1
+      FROM \`${this.dataset}.${this.table}\`
+      WHERE ${this.timestampColumn} = @timestamp
+        AND device_id = @deviceId
+      LIMIT 1
+    `;
+
+    const options = {
+      query,
+      params: {
+        timestamp: record.timestamp,
+        deviceId: record.deviceId
+      }
+    };
+
+    try {
+      const [rows] = await this.client.query(options);
+      return rows.length > 0;
+    } catch (error) {
+      console.error('BigQuery verify error:', error);
+      return false;
+    }
   }
 }

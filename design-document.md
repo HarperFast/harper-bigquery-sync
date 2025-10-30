@@ -337,38 +337,60 @@ Not needed yet, but on the roadmap if dynamic scaling becomes essential.
 
 ### Continuous Validation
 
-Every 5 minutes, each node validates its partition:
+**Note:** Harper's `count()` returns estimates with large, inconsistent ranges. Count-based validation is unreliable.
 
+Instead, validation uses three complementary approaches:
+
+**1. Checkpoint Progress Monitoring**
 ```javascript
-// Count in BigQuery for my partition
-const bqCount = await bigquery.query(`
-  SELECT COUNT(*) 
-  FROM table 
-  WHERE MOD(hash, ${clusterSize}) = ${myNodeId}
-`);
+// Monitor that ingestion is progressing
+const checkpoint = await tables.SyncCheckpoint.get(nodeId);
+const timeSinceLastSync = Date.now() - new Date(checkpoint.lastSyncTime);
+const lagSeconds = (Date.now() - new Date(checkpoint.lastTimestamp)) / 1000;
 
-// Count in local Harper
-const harperCount = await harper.count('table');
-
-// Log audit record
-await audit.insert({
-  timestamp: new Date(),
-  nodeId: myNodeId,
-  bigQueryCount: bqCount,
-  harperCount: harperCount,
-  delta: bqCount - harperCount,
-  status: Math.abs(bqCount - harperCount) < 100 ? 'ok' : 'drift'
-});
+// Alert if stalled for 10+ minutes
+if (timeSinceLastSync > 600000) {
+  alert('Ingestion stalled');
+}
 ```
 
-If drift exceeds threshold, alert fires.
+**2. Smoke Test Queries**
+```javascript
+// Verify Harper is queryable and data is recent
+const recentRecords = await tables.BigQueryData.search({
+  conditions: [{ timestamp: { $gt: fiveMinutesAgo } }],
+  limit: 1
+});
+
+if (recentRecords.length === 0) {
+  alert('No recent data found');
+}
+```
+
+**3. Record Spot Checking**
+```javascript
+// Randomly verify specific records exist in both systems
+const harperSample = await tables.BigQueryData.search({ limit: 5 });
+
+for (const record of harperSample) {
+  const exists = await bigquery.query(`
+    SELECT 1 FROM table
+    WHERE timestamp = @ts AND device_id = @device LIMIT 1
+  `, { ts: record.timestamp, device: record.deviceId });
+
+  if (!exists) {
+    alert('Phantom record detected');
+  }
+}
+```
 
 ### Key Metrics
 
 - **Lag:** How far behind BigQuery (seconds)
 - **Throughput:** Records/second per node
 - **Phase:** Initial sync, catch-up, or steady-state
-- **Drift:** Difference between BigQuery and Harper counts
+- **Checkpoint freshness:** Time since last checkpoint update
+- **Spot check results:** Records validated vs. mismatches found
 - **Error rate:** Failed batches per minute
 
 ---

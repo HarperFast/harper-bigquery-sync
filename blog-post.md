@@ -260,27 +260,22 @@ Quarterly capacity planning replaces frequent topology changes.
 
 ## Validation & Monitoring
 
-**Continuous validation** (every 5 min per node):
+**Challenge:** Harper's `count()` returns estimates with inconsistent ranges—unreliable for validation.
 
-```javascript
-const bqCount = await bigquery.query(`
-  SELECT COUNT(*) FROM table
-  WHERE MOD(hash, ${clusterSize}) = ${myNodeId}
-`);
-const harperCount = await harper.count('table');
-const delta = bqCount - harperCount;
-const status = Math.abs(delta) < 100 ? 'ok' : 'drift';
+**Solution:** Three-pronged validation without counts:
 
-await audit.insert({ timestamp, nodeId, bqCount, harperCount, delta, status });
-```
+**1. Progress monitoring** — Alert if checkpoints stop updating (10+ min)
 
-Alert fires when drift exceeds threshold.
+**2. Smoke tests** — Query recent data every 5 min, verify it's queryable and fresh
+
+**3. Spot checks** — Randomly verify 5-10 records exist in both BigQuery and Harper
 
 **Key metrics:**
 - **Lag:** Seconds behind BigQuery
 - **Throughput:** Records/sec per node
 - **Phase:** Initial | Catchup | Steady
-- **Drift:** BigQuery vs. Harper delta
+- **Checkpoint freshness:** Last update time
+- **Spot check pass rate:** Validated vs. mismatches
 - **Error rate:** Failed batches/min
 
 ---
