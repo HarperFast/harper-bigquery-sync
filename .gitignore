@@ -20,6 +20,3 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
-
-# Harper-specific
-config.yaml

@@ -1,0 +1,28 @@
+# Loads environment variables from the specified files
+loadEnv:
+  files: '.env'
+
+# This provides the HTTP REST interface for all exported resources
+rest: true
+
+# Include HTTP request logging
+http:
+  logging:
+    timing: true
+    id: true
+    level: info
+    path: ~/hdb/log/http.log
+
+# These reads GraphQL schemas to define the schema of database/tables/attributes
+# graphql: true
+graphqlSchema:
+  files: 'schema.graphql'
+
+# Loads JavaScript modules such that their exports are exported as resources
+jsResource:
+  files: 'resources.js'
+
+# Load orchestrator module
+bigquery-ingestor:
+  package: 'bigquery-ingestor'
+  files: '/'
