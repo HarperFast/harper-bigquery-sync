@@ -9,10 +9,9 @@
 
 /* global tables, Resource */
 
-import { BigQuerySync } from './src/sync-engine.js';
-import { ValidationService } from './src/validation.js';
+import { BigQueryIngestor, ValidationService } from 'bigquery-ingestor';
 
-const syncEngine = new BigQuerySync();
+const syncEngine = new BigQueryIngestor();
 const validator = new ValidationService();
 
 // Main data table resource

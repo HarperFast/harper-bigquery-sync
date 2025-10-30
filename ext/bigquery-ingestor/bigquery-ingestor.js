@@ -7,7 +7,7 @@
 import { BigQueryClient } from './bigquery-client.js';
 import { createHash } from 'node:crypto';
 
-export class BigQuerySync {
+export class BigQueryIngestor {
   constructor() {
     this.client = new BigQueryClient();
     this.running = false;
@@ -261,3 +261,7 @@ export class BigQuerySync {
     };
   }
 }
+
+// Export additional classes for use in resources.js
+export { ValidationService } from './validation.js';
+export { BigQueryClient } from './bigquery-client.js';

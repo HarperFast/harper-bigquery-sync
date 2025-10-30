@@ -1,0 +1,6 @@
+{
+    "name": "bigquery-ingestor",
+    "version" : "1.0.0",
+    "main" : "bigquery-ingestor.js",
+    "type" : "module"
+}
