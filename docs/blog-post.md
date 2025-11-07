@@ -413,6 +413,32 @@ This pattern applies beyond BigQuery and Harper—anywhere you need large-scale 
 
 ---
 
+## Testing at Scale
+
+To validate this architecture with realistic workloads, we built the **Maritime Vessel Data Synthesizer**:
+
+**What it does:**
+- Generates 100,000+ vessel positions with realistic movement patterns
+- Simulates global maritime traffic across 29 major ports
+- Produces 144,000+ records/day to BigQuery
+- Uses the same `config.yaml` configuration as the plugin
+
+**Why it matters:**
+- Test the full ingestion pipeline without production data
+- Validate partition distribution across nodes
+- Load test with millions of records
+- Privacy-compliant development and testing
+
+**Quick start:**
+```bash
+npx maritime-data-synthesizer initialize 30  # Load 30 days
+npx maritime-data-synthesizer start          # Continuous generation
+```
+
+See [docs/QUICKSTART.md](docs/QUICKSTART.md) for the 5-minute setup guide or [MARITIME-SYNTHESIZER-README.md](../MARITIME-SYNTHESIZER-README.md) for feature details.
+
+---
+
 ## Get Started
 
 **Try Harper Fabric:** [fabric.harper.fast](https://fabric.harper.fast) — Deploy globally distributed applications with built-in sync. Free tier, no credit card.

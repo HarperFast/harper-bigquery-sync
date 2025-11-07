@@ -20,3 +20,18 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+.claude/
+
+tmp/
+
+service-account-key.json
+*-key.json
+*.json.key
+
+# Test scripts (keep actual test files in test/)
+test-*.js
+!test/**/*.test.js
+
+# Internal docs (not for publication)
+docs/internal/

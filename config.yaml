@@ -1,28 +1,63 @@
-# Loads environment variables from the specified files
-loadEnv:
-  files: '.env'
+# File: config.yaml
+pluginModule: ./src/index.js
 
-# This provides the HTTP REST interface for all exported resources
 rest: true
 
-# Include HTTP request logging
-http:
-  logging:
-    timing: true
-    id: true
-    level: info
-    path: ~/hdb/log/http.log
-
-# These reads GraphQL schemas to define the schema of database/tables/attributes
-# graphql: true
 graphqlSchema:
-  files: 'schema.graphql'
+  files: 'schema/harper-bigquery-sync.graphql'
+  # urlPath: 'harper-bigquery-sync'
 
-# Loads JavaScript modules such that their exports are exported as resources
 jsResource:
-  files: 'resources.js'
+  files: 'src/resources.js'
+  # urlPath: 'harper-bigquery-sync'
 
-# Load orchestrator module
-bigquery-ingestor:
-  package: 'bigquery-ingestor'
-  files: '/'
+bigquery:
+  projectId: irjudson-demo
+  dataset: maritime_tracking
+  table: vessel_positions
+  timestampColumn: timestamp
+  credentials: service-account-key.json
+  location: US  # BigQuery dataset location (US, EU, or specific region like us-central1)
+
+# Maritime vessel data synthesizer configuration (OPTIONAL)
+# Optional: Override target dataset/table (defaults to bigquery.dataset and bigquery.table)
+# By default, synthesizer uses the bigquery: section above (same dataset/table as plugin)
+# Uncomment settings below to override defaults for the synthesizer
+# synthesizer:
+  # dataset: maritime_tracking
+  # table: vessel_positions
+
+  # Data generation settings (optional, these are the defaults)
+  # totalVessels: 100000        # Total vessel pool size
+  # batchSize: 100              # Vessel positions per batch
+  # generationIntervalMs: 60000 # Time between batches (ms) - 60 seconds
+
+  # Data retention (optional, these are the defaults)
+  # retentionDays: 30           # How many days to keep data
+  # cleanupIntervalHours: 24    # How often to run cleanup
+
+# Default settings
+sync:
+  # Start timestamp (ISO format) - omit to start from beginning
+  # startTimestamp: "2024-01-01T00:00:00Z"
+  
+  # Batch sizes for different phases
+  initialBatchSize: 10000
+  catchupBatchSize: 1000
+  steadyBatchSize: 500
+  
+  # Lag thresholds (seconds)
+  catchupThreshold: 3600   # 1 hour
+  steadyThreshold: 300     # 5 minutes
+  
+  # Polling interval in steady state (milliseconds)
+  pollInterval: 30000      # 30 seconds
+
+validation:
+  enabled: true
+  interval: 300            # Run every 5 minutes
+
+retry:
+  maxAttempts: 5
+  backoffMultiplier: 2
+  initialDelay: 1000       # milliseconds
