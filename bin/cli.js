@@ -281,6 +281,9 @@ async function runMultiTableMode(command, arg, config) {
       await orchestrator.verify(config.datasetId);
 
       console.log('\nInitialization complete!');
+
+      // Force exit after completion (BigQuery client may keep process alive)
+      setTimeout(() => process.exit(0), 100);
       break;
     }
 
@@ -300,7 +303,8 @@ async function runMultiTableMode(command, arg, config) {
       process.exit(1);
   }
 
-  process.exit(0);
+  // Note: process.exit(0) is handled in initialize case above with setTimeout
+  // to allow BigQuery client to finish cleanup
 }
 
 main();

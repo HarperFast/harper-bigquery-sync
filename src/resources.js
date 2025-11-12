@@ -11,23 +11,62 @@
 import { globals } from './globals.js';
     
 // Main data table resource
-export class BigQueryData extends tables.BigQueryData {
+export class VesselMetadata extends tables.VesselMetadata {
   async get(id) {
-    logger.debug(`[BigQueryData.get] Fetching record with id: ${id}`);
+    logger.debug(`[VesselMetadata.get] Fetching record with id: ${id}`);
     const result = await super.get(id);
-    logger.debug(`[BigQueryData.get] Record ${result ? 'found' : 'not found'}`);
+    logger.debug(`[VesselMetadata.get] Record ${result ? 'found' : 'not found'}`);
     return result;
   }
 
   async search(params) {
     // This allows us to search on dynamic attributes.
     params.allowConditionsOnDynamicAttributes = true;
-    logger.debug(`[BigQueryData.search] Searching with params: ${JSON.stringify(params).substring(0, 200)}`);
+    logger.debug(`[VesselMetadata.search] Searching with params: ${JSON.stringify(params).substring(0, 200)}`);
     const results = await super.search(params);
-    logger.info(`[BigQueryData.search] Search returned ${results.length} records`);
+    logger.info(`[VesselMetadata.search] Search returned ${results.length} records`);
     return results;
   }
 }
+
+// Main data table resource
+export class VesselPositions extends tables.VesselPositions {
+  async get(id) {
+    logger.debug(`[VesselPositions.get] Fetching record with id: ${id}`);
+    const result = await super.get(id);
+    logger.debug(`[VesselPositions.get] Record ${result ? 'found' : 'not found'}`);
+    return result;
+  }
+
+  async search(params) {
+    // This allows us to search on dynamic attributes.
+    params.allowConditionsOnDynamicAttributes = true;
+    logger.debug(`[VesselPositions.search] Searching with params: ${JSON.stringify(params).substring(0, 200)}`);
+    const results = await super.search(params);
+    logger.info(`[VesselPositions.search] Search returned ${results.length} records`);
+    return results;
+  }
+}
+
+// Main data table resource
+export class PortEvents extends tables.PortEvents {
+  async get(id) {
+    logger.debug(`[PortEvents.get] Fetching record with id: ${id}`);
+    const result = await super.get(id);
+    logger.debug(`[PortEvents.get] Record ${result ? 'found' : 'not found'}`);
+    return result;
+  }
+
+  async search(params) {
+    // This allows us to search on dynamic attributes.
+    params.allowConditionsOnDynamicAttributes = true;
+    logger.debug(`[PortEvents.search] Searching with params: ${JSON.stringify(params).substring(0, 200)}`);
+    const results = await super.search(params);
+    logger.info(`[PortEvents.search] Search returned ${results.length} records`);
+    return results;
+  }
+}
+
 
 // Checkpoint resource
 export class SyncCheckpoint extends tables.SyncCheckpoint {
@@ -91,14 +130,9 @@ export class SyncControl extends Resource {
         return { message: 'Sync stopped' };
       case 'validate':
         logger.info('[SyncControl.post] Triggering validation');
-        const validator = globals.get('validator');
-        if (!validator) {
-          logger.warn('[SyncControl.post] Validation not available - validator not initialized');
-          throw new Error('Validation service not available. Check configuration and logs.');
-        }
-        const results = await validator.runValidation();
+        await globals.get('validator').runValidation();
         logger.info('[SyncControl.post] Validation completed');
-        return { message: 'Validation triggered', results };
+        return { message: 'Validation triggered' };
       default:
         logger.warn(`[SyncControl.post] Unknown action requested: ${action}`);
         throw new Error(`Unknown action: ${action}`);

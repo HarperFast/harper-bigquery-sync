@@ -18,10 +18,6 @@ type VesselMetadata @table {
   # All BigQuery fields stored directly at top level
 }
 
-
-
-
-
 # Checkpoint table for ingestion
 # Supports multi-table sync with composite checkpoint IDs
 type SyncCheckpoint @table {
