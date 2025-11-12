@@ -17,6 +17,9 @@ import { VesselPositionsGenerator } from './generators/vessel-positions-generato
 import { PortEventsGenerator } from './generators/port-events-generator.js';
 import { VesselMetadataGenerator } from './generators/vessel-metadata-generator.js';
 import { TEST_SCENARIOS, SAMPLE_VESSELS } from '../../test/fixtures/multi-table-test-data.js';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 export class MultiTableOrchestrator {
   /**
@@ -376,7 +379,7 @@ export class MultiTableOrchestrator {
   }
 
   /**
-   * Inserts records into BigQuery table
+   * Inserts records into BigQuery table using load job API
    * @param {string} dataset - Dataset name
    * @param {string} table - Table name
    * @param {Array<Object>} records - Records to insert
@@ -385,6 +388,7 @@ export class MultiTableOrchestrator {
   async insertRecords(dataset, table, records) {
     if (records.length === 0) return;
 
+    // Use load job API instead of streaming insert to support free tier
     // BigQuery has a limit on request size, so batch the inserts
     const batchSize = 10000;
     const batches = Math.ceil(records.length / batchSize);
@@ -395,10 +399,23 @@ export class MultiTableOrchestrator {
       const batch = records.slice(start, end);
 
       try {
+        // Write records to temporary file
+        const tmpFile = path.join(os.tmpdir(), `bigquery-load-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.json`);
+        const ndjson = batch.map(record => JSON.stringify(record)).join('\n');
+        fs.writeFileSync(tmpFile, ndjson);
+
+        // Load file into BigQuery using load job API
         await this.bigquery
           .dataset(dataset)
           .table(table)
-          .insert(batch);
+          .load(tmpFile, {
+            sourceFormat: 'NEWLINE_DELIMITED_JSON',
+            writeDisposition: 'WRITE_APPEND',
+            autodetect: false
+          });
+
+        // Clean up temp file
+        fs.unlinkSync(tmpFile);
 
         if (batches > 1) {
           const progress = Math.floor((end / records.length) * 100);
