@@ -5,6 +5,7 @@
  */
 
 import { MaritimeDataSynthesizer } from '../src/maritime-synthesizer.js';
+import { MultiTableOrchestrator } from '../ext/maritime-data-synthesizer/multi-table-orchestrator.js';
 import { getSynthesizerConfig } from '../src/config-loader.js';
 
 const COMMANDS = {
@@ -65,6 +66,33 @@ async function main() {
     console.log(`  Table: ${config.tableId}`);
     console.log('');
 
+    // Check if multi-table mode is configured
+    // Multi-table mode is used when config has bigquery.tables array
+    const isMultiTable = config.multiTableConfig && config.multiTableConfig.length > 0;
+
+    if (isMultiTable) {
+      console.log('Multi-table mode detected - using orchestrator');
+      console.log(`  Tables: ${config.multiTableConfig.map(t => t.table).join(', ')}`);
+      console.log('');
+      await runMultiTableMode(command, arg, config);
+    } else {
+      console.log('Single-table mode - using legacy synthesizer');
+      console.log('');
+      await runSingleTableMode(command, arg, config);
+    }
+  } catch (error) {
+    console.error('Error:', error.message);
+    if (error.message.includes('config.yaml')) {
+      console.error('\nMake sure config.yaml exists and has valid bigquery and synthesizer sections');
+    }
+    if (error.code === 'ENOENT' && error.message.includes('service-account-key')) {
+      console.error('\nMake sure the credentials file specified in config.yaml exists');
+    }
+    process.exit(1);
+  }
+}
+
+async function runSingleTableMode(command, arg, config) {
     const synthesizer = new MaritimeDataSynthesizer(config);
 
     switch (command) {
@@ -213,16 +241,66 @@ async function main() {
     if (command !== 'start') {
       process.exit(0);
     }
-  } catch (error) {
-    console.error('Error:', error.message);
-    if (error.message.includes('config.yaml')) {
-      console.error('\nMake sure config.yaml exists and has valid bigquery and synthesizer sections');
+}
+
+async function runMultiTableMode(command, arg, config) {
+  console.log('\nMulti-table orchestrator mode - generating all configured tables');
+  console.log('Note: Only "initialize" command is currently supported for multi-table mode');
+  console.log('For continuous generation, use single-table mode\n');
+
+  switch (command) {
+    case 'initialize': {
+      const scenario = arg || 'realistic';
+      const validScenarios = ['small', 'realistic', 'stress'];
+
+      if (!validScenarios.includes(scenario)) {
+        console.error(`Invalid scenario: ${scenario}`);
+        console.error(`Valid scenarios: ${validScenarios.join(', ')}`);
+        process.exit(1);
+      }
+
+      console.log(`Generating data for scenario: ${scenario}`);
+
+      const orchestrator = new MultiTableOrchestrator({
+        bigquery: {
+          projectId: config.projectId,
+          keyFilename: config.credentials,
+          location: config.location
+        },
+        scenario,
+        startTime: new Date()
+      });
+
+      await orchestrator.generateAll({
+        dataset: config.datasetId,
+        createDataset: true,
+        truncateTables: false
+      });
+
+      console.log('\nVerifying generated data...');
+      await orchestrator.verify(config.datasetId);
+
+      console.log('\nInitialization complete!');
+      break;
     }
-    if (error.code === 'ENOENT' && error.message.includes('service-account-key')) {
-      console.error('\nMake sure the credentials file specified in config.yaml exists');
-    }
-    process.exit(1);
+
+    case 'start':
+    case 'stats':
+    case 'clear':
+    case 'clean':
+    case 'reset':
+      console.error(`\nCommand "${command}" is not yet supported in multi-table mode.`);
+      console.error('Available commands for multi-table mode:');
+      console.error('  initialize <scenario>  - Generate test data (scenarios: small, realistic, stress)');
+      console.error('\nFor continuous generation, switch to single-table mode in config.yaml');
+      process.exit(1);
+
+    default:
+      console.error(`Command not implemented: ${command}`);
+      process.exit(1);
   }
+
+  process.exit(0);
 }
 
 main();

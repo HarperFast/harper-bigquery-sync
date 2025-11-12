@@ -2,12 +2,6 @@
 // File: validation.js
 // Validation service for data integrity checks
 // NOTE: Avoids count-based validation since Harper counts are estimates
-//
-// ⚠️  WARNING: This validation service is not yet fully implemented and tested.
-// ⚠️  It is currently disabled in the plugin. See TODO comments in:
-// ⚠️  - src/index.js
-// ⚠️  - src/resources.js
-// ⚠️  - src/sync-engine.js
 
 /* global harperCluster, tables */
 
@@ -18,8 +12,35 @@ export class ValidationService {
   constructor(config) {
     this.config = config;
     logger.info('[ValidationService] Constructor called - initializing validation service');
-    this.bigqueryClient = new BigQueryClient(config);
-    logger.debug('[ValidationService] BigQuery client initialized for validation');
+
+    // For multi-table support, store table-specific configs
+    this.tables = config.bigquery?.tables || [];
+
+    // Create BigQueryClient for each table
+    this.bigqueryClients = new Map();
+    if (this.tables.length > 0) {
+      for (const tableConfig of this.tables) {
+        const clientConfig = {
+          bigquery: {
+            projectId: config.bigquery.projectId,
+            dataset: tableConfig.dataset,
+            table: tableConfig.table,
+            timestampColumn: tableConfig.timestampColumn,
+            columns: tableConfig.columns,
+            credentials: config.bigquery.credentials,
+            location: config.bigquery.location
+          }
+        };
+        this.bigqueryClients.set(tableConfig.id, {
+          client: new BigQueryClient(clientConfig),
+          targetTable: tableConfig.targetTable,
+          timestampColumn: tableConfig.timestampColumn
+        });
+        logger.debug(`[ValidationService] BigQuery client initialized for table: ${tableConfig.id}`);
+      }
+    }
+
+    logger.info(`[ValidationService] Validation service initialized for ${this.tables.length} tables`);
   }
 
   async runValidation() {
@@ -27,31 +48,47 @@ export class ValidationService {
 
     const results = {
       timestamp: new Date().toISOString(),
-      checks: {}
+      tables: {}
     };
 
     try {
-      // 1. Checkpoint progress monitoring
-      logger.debug('[ValidationService.runValidation] Running checkpoint progress validation');
-      results.checks.progress = await this.validateProgress();
-      logger.info(`[ValidationService.runValidation] Progress check complete: ${results.checks.progress.status}`);
+      // Validate each table independently
+      for (const tableConfig of this.tables) {
+        logger.info(`[ValidationService.runValidation] Validating table: ${tableConfig.id}`);
 
-      // 2. Smoke test - can we query recent data?
-      logger.debug('[ValidationService.runValidation] Running smoke test');
-      results.checks.smokeTest = await this.smokeTest();
-      logger.info(`[ValidationService.runValidation] Smoke test complete: ${results.checks.smokeTest.status}`);
+        results.tables[tableConfig.id] = {
+          checks: {}
+        };
 
-      // 3. Spot check random records
-      logger.debug('[ValidationService.runValidation] Running spot check');
-      results.checks.spotCheck = await this.spotCheckRecords();
-      logger.info(`[ValidationService.runValidation] Spot check complete: ${results.checks.spotCheck.status}`);
+        // 1. Checkpoint progress monitoring
+        logger.debug(`[ValidationService.runValidation] Running checkpoint progress validation for ${tableConfig.id}`);
+        results.tables[tableConfig.id].checks.progress = await this.validateProgress(tableConfig.id);
+        logger.info(`[ValidationService.runValidation] Progress check for ${tableConfig.id}: ${results.tables[tableConfig.id].checks.progress.status}`);
 
-      // Determine overall status
-      const allHealthy = Object.values(results.checks).every(
-        check => check.status === 'healthy' || check.status === 'ok'
+        // 2. Smoke test - can we query recent data?
+        logger.debug(`[ValidationService.runValidation] Running smoke test for ${tableConfig.id}`);
+        results.tables[tableConfig.id].checks.smokeTest = await this.smokeTest(tableConfig.id, tableConfig.targetTable, tableConfig.timestampColumn);
+        logger.info(`[ValidationService.runValidation] Smoke test for ${tableConfig.id}: ${results.tables[tableConfig.id].checks.smokeTest.status}`);
+
+        // 3. Spot check random records
+        logger.debug(`[ValidationService.runValidation] Running spot check for ${tableConfig.id}`);
+        results.tables[tableConfig.id].checks.spotCheck = await this.spotCheckRecords(tableConfig.id);
+        logger.info(`[ValidationService.runValidation] Spot check for ${tableConfig.id}: ${results.tables[tableConfig.id].checks.spotCheck.status}`);
+
+        // Determine per-table status
+        const tableChecks = results.tables[tableConfig.id].checks;
+        const tableHealthy = Object.values(tableChecks).every(
+          check => check.status === 'healthy' || check.status === 'ok'
+        );
+        results.tables[tableConfig.id].overallStatus = tableHealthy ? 'healthy' : 'issues_detected';
+      }
+
+      // Determine overall status across all tables
+      const allTablesHealthy = Object.values(results.tables).every(
+        table => table.overallStatus === 'healthy'
       );
 
-      results.overallStatus = allHealthy ? 'healthy' : 'issues_detected';
+      results.overallStatus = allTablesHealthy ? 'healthy' : 'issues_detected';
       logger.info(`[ValidationService.runValidation] Overall validation status: ${results.overallStatus}`);
 
       // Log to audit table
@@ -69,36 +106,42 @@ export class ValidationService {
     }
   }
 
-  async validateProgress() {
-    logger.debug('[ValidationService.validateProgress] Validating checkpoint progress');
+  async validateProgress(tableId) {
+    logger.debug(`[ValidationService.validateProgress] Validating checkpoint progress for table: ${tableId}`);
     const clusterInfo = await this.discoverCluster();
     logger.debug(`[ValidationService.validateProgress] Cluster info - nodeId: ${clusterInfo.nodeId}, clusterSize: ${clusterInfo.clusterSize}`);
 
-    const checkpoint = await tables.SyncCheckpoint.get(clusterInfo.nodeId);
+    // Use composite checkpoint ID: {tableId}_{nodeId}
+    const checkpointId = `${tableId}_${clusterInfo.nodeId}`;
+    logger.debug(`[ValidationService.validateProgress] Looking up checkpoint: ${checkpointId}`);
+
+    const checkpoint = await tables.SyncCheckpoint.get(checkpointId);
 
     if (!checkpoint) {
-      logger.warn('[ValidationService.validateProgress] No checkpoint found - node may not have started');
+      logger.warn(`[ValidationService.validateProgress] No checkpoint found for ${tableId} - table may not have started syncing`);
       return {
         status: 'no_checkpoint',
-        message: 'No checkpoint found - node may not have started'
+        message: `No checkpoint found for table ${tableId} - may not have started`,
+        tableId
       };
     }
 
-    logger.debug(`[ValidationService.validateProgress] Checkpoint found - lastTimestamp: ${checkpoint.lastTimestamp}, recordsIngested: ${checkpoint.recordsIngested}`);
+    logger.debug(`[ValidationService.validateProgress] Checkpoint found for ${tableId} - lastTimestamp: ${checkpoint.lastTimestamp}, recordsIngested: ${checkpoint.recordsIngested}`);
 
     const timeSinceLastSync = Date.now() - new Date(checkpoint.lastSyncTime).getTime();
     const lagSeconds = (Date.now() - new Date(checkpoint.lastTimestamp).getTime()) / 1000;
 
-    logger.debug(`[ValidationService.validateProgress] Time since last sync: ${timeSinceLastSync}ms, lag: ${lagSeconds.toFixed(2)}s`);
+    logger.debug(`[ValidationService.validateProgress] ${tableId} - Time since last sync: ${timeSinceLastSync}ms, lag: ${lagSeconds.toFixed(2)}s`);
 
     // Alert if no progress in 10 minutes
     if (timeSinceLastSync > 600000) {
-      logger.warn(`[ValidationService.validateProgress] Sync appears STALLED - no progress in ${(timeSinceLastSync / 1000 / 60).toFixed(2)} minutes`);
+      logger.warn(`[ValidationService.validateProgress] ${tableId} sync appears STALLED - no progress in ${(timeSinceLastSync / 1000 / 60).toFixed(2)} minutes`);
       return {
         status: 'stalled',
         message: 'No ingestion progress in 10+ minutes',
         timeSinceLastSync,
-        lastTimestamp: checkpoint.lastTimestamp
+        lastTimestamp: checkpoint.lastTimestamp,
+        tableId
       };
     }
 
@@ -107,133 +150,176 @@ export class ValidationService {
     if (lagSeconds > 3600) lagStatus = 'severely_lagging';
     else if (lagSeconds > 300) lagStatus = 'lagging';
 
-    logger.info(`[ValidationService.validateProgress] Progress validation complete - status: ${lagStatus}, lag: ${lagSeconds.toFixed(2)}s`);
+    logger.info(`[ValidationService.validateProgress] ${tableId} progress validation complete - status: ${lagStatus}, lag: ${lagSeconds.toFixed(2)}s`);
 
     return {
       status: lagStatus,
       lagSeconds,
       recordsIngested: checkpoint.recordsIngested,
       phase: checkpoint.phase,
-      lastTimestamp: checkpoint.lastTimestamp
+      lastTimestamp: checkpoint.lastTimestamp,
+      tableId
     };
   }
 
-  async smokeTest() {
-    logger.debug('[ValidationService.smokeTest] Running smoke test - checking for recent data');
+  async smokeTest(tableId, targetTable, timestampColumn) {
+    logger.debug(`[ValidationService.smokeTest] Running smoke test for table: ${tableId} (${targetTable})`);
     const fiveMinutesAgo = new Date(Date.now() - 300000).toISOString();
-    logger.debug(`[ValidationService.smokeTest] Looking for records after ${fiveMinutesAgo}`);
+    logger.debug(`[ValidationService.smokeTest] Looking for ${targetTable} records after ${fiveMinutesAgo}`);
 
     try {
-      // Can we query recent data?
-      logger.debug('[ValidationService.smokeTest] Querying BigQueryData table for recent records');
-      const recentRecords = await tables.BigQueryData.search({
-        conditions: [{ timestamp: { $gt: fiveMinutesAgo } }],
+      // Can we query recent data from the target Harper table?
+      logger.debug(`[ValidationService.smokeTest] Querying ${targetTable} table for recent records`);
+
+      // Dynamic table access
+      const targetTableObj = tables[targetTable];
+      if (!targetTableObj) {
+        logger.error(`[ValidationService.smokeTest] Target table ${targetTable} not found in schema`);
+        return {
+          status: 'table_not_found',
+          message: `Target table ${targetTable} not found`,
+          tableId
+        };
+      }
+
+      const recentRecords = await targetTableObj.search({
+        conditions: [{ [timestampColumn]: { $gt: fiveMinutesAgo } }],
         limit: 1,
-        orderBy: 'timestamp DESC'
+        orderBy: `${timestampColumn} DESC`
       });
 
-      logger.debug(`[ValidationService.smokeTest] Query returned ${recentRecords.length} records`);
+      logger.debug(`[ValidationService.smokeTest] ${tableId} - Query returned ${recentRecords.length} records`);
 
       if (recentRecords.length === 0) {
-        logger.warn('[ValidationService.smokeTest] No recent data found in last 5 minutes');
+        logger.warn(`[ValidationService.smokeTest] ${tableId} - No recent data found in last 5 minutes`);
         return {
           status: 'no_recent_data',
-          message: 'No records found in last 5 minutes'
+          message: 'No records found in last 5 minutes',
+          tableId
         };
       }
 
       const latestRecord = recentRecords[0];
-      const recordLagSeconds = (Date.now() - new Date(latestRecord.timestamp).getTime()) / 1000;
+      const recordLagSeconds = (Date.now() - new Date(latestRecord[timestampColumn]).getTime()) / 1000;
 
-      logger.info(`[ValidationService.smokeTest] Smoke test passed - latest record is ${Math.round(recordLagSeconds)}s old (timestamp: ${latestRecord.timestamp})`);
+      logger.info(`[ValidationService.smokeTest] ${tableId} smoke test passed - latest record is ${Math.round(recordLagSeconds)}s old`);
 
       return {
         status: 'healthy',
-        latestTimestamp: latestRecord.timestamp,
+        latestTimestamp: latestRecord[timestampColumn],
         lagSeconds: recordLagSeconds,
-        message: `Latest record is ${Math.round(recordLagSeconds)}s old`
+        message: `Latest record is ${Math.round(recordLagSeconds)}s old`,
+        tableId
       };
 
     } catch (error) {
-      logger.error(`[ValidationService.smokeTest] Query failed: ${error.message}`, error);
+      logger.error(`[ValidationService.smokeTest] ${tableId} query failed: ${error.message}`, error);
       return {
         status: 'query_failed',
         message: 'Failed to query Harper',
-        error: error.message
+        error: error.message,
+        tableId
       };
     }
   }
 
-  async spotCheckRecords() {
-    logger.debug('[ValidationService.spotCheckRecords] Starting spot check validation');
+  async spotCheckRecords(tableId) {
+    logger.debug(`[ValidationService.spotCheckRecords] Starting spot check validation for table: ${tableId}`);
     const clusterInfo = await this.discoverCluster();
-    logger.debug(`[ValidationService.spotCheckRecords] Using nodeId: ${clusterInfo.nodeId}, clusterSize: ${clusterInfo.clusterSize}`);
+    logger.debug(`[ValidationService.spotCheckRecords] ${tableId} - Using nodeId: ${clusterInfo.nodeId}, clusterSize: ${clusterInfo.clusterSize}`);
     const issues = [];
 
     try {
+      const clientInfo = this.bigqueryClients.get(tableId);
+      if (!clientInfo) {
+        logger.error(`[ValidationService.spotCheckRecords] No BigQuery client found for table: ${tableId}`);
+        return {
+          status: 'config_error',
+          message: `No BigQuery client found for table ${tableId}`,
+          tableId
+        };
+      }
+
+      const { client: bigqueryClient, targetTable, timestampColumn } = clientInfo;
+
+      // Dynamic table access
+      const targetTableObj = tables[targetTable];
+      if (!targetTableObj) {
+        logger.error(`[ValidationService.spotCheckRecords] Target table ${targetTable} not found in schema`);
+        return {
+          status: 'table_not_found',
+          message: `Target table ${targetTable} not found`,
+          tableId
+        };
+      }
+
       // Get 5 recent records from Harper
-      logger.debug('[ValidationService.spotCheckRecords] Fetching 5 recent records from Harper');
-      const harperSample = await tables.BigQueryData.search({
+      logger.debug(`[ValidationService.spotCheckRecords] ${tableId} - Fetching 5 recent records from ${targetTable}`);
+      const harperSample = await targetTableObj.search({
         limit: 5,
-        orderBy: 'timestamp DESC'
+        orderBy: `${timestampColumn} DESC`
       });
 
-      logger.debug(`[ValidationService.spotCheckRecords] Retrieved ${harperSample.length} records from Harper`);
+      logger.debug(`[ValidationService.spotCheckRecords] ${tableId} - Retrieved ${harperSample.length} records from Harper`);
 
       if (harperSample.length === 0) {
-        logger.warn('[ValidationService.spotCheckRecords] No records found in Harper for validation');
+        logger.warn(`[ValidationService.spotCheckRecords] ${tableId} - No records found in Harper for validation`);
         return {
           status: 'no_data',
-          message: 'No records in Harper to validate'
+          message: 'No records in Harper to validate',
+          tableId
         };
       }
 
       // Verify each exists in BigQuery
-      logger.debug(`[ValidationService.spotCheckRecords] Verifying ${harperSample.length} Harper records exist in BigQuery`);
+      logger.debug(`[ValidationService.spotCheckRecords] ${tableId} - Verifying ${harperSample.length} Harper records exist in BigQuery`);
       for (const record of harperSample) {
-        logger.trace(`[ValidationService.spotCheckRecords] Verifying Harper record: id=${record.id}, timestamp=${record.timestamp}`);
-        const exists = await this.bigqueryClient.verifyRecord(record);
+        logger.trace(`[ValidationService.spotCheckRecords] ${tableId} - Verifying Harper record: id=${record.id}, ${timestampColumn}=${record[timestampColumn]}`);
+        const recordWithTimestamp = { ...record, timestamp: record[timestampColumn] };
+        const exists = await bigqueryClient.verifyRecord(recordWithTimestamp);
         if (!exists) {
-          logger.warn(`[ValidationService.spotCheckRecords] Phantom record found - exists in Harper but not BigQuery: ${record.id}`);
+          logger.warn(`[ValidationService.spotCheckRecords] ${tableId} - Phantom record found: ${record.id}`);
           issues.push({
             type: 'phantom_record',
-            timestamp: record.timestamp,
+            timestamp: record[timestampColumn],
             id: record.id,
-            message: 'Record exists in Harper but not in BigQuery'
+            message: 'Record exists in Harper but not in BigQuery',
+            tableId
           });
         }
       }
 
       // Reverse check: verify recent BigQuery records exist in Harper
       const oneHourAgo = new Date(Date.now() - 3600000).toISOString();
-      logger.debug(`[ValidationService.spotCheckRecords] Fetching recent BigQuery records (after ${oneHourAgo})`);
-      const bqSample = await this.bigqueryClient.pullPartition({
+      logger.debug(`[ValidationService.spotCheckRecords] ${tableId} - Fetching recent BigQuery records (after ${oneHourAgo})`);
+      const bqSample = await bigqueryClient.pullPartition({
         nodeId: clusterInfo.nodeId,
         clusterSize: clusterInfo.clusterSize,
-        lastTimestamp: oneHourAgo, // Last hour
+        lastTimestamp: oneHourAgo,
         batchSize: 5
       });
 
-      logger.debug(`[ValidationService.spotCheckRecords] Retrieved ${bqSample.length} records from BigQuery for reverse check`);
+      logger.debug(`[ValidationService.spotCheckRecords] ${tableId} - Retrieved ${bqSample.length} records from BigQuery for reverse check`);
 
       for (const record of bqSample) {
-        const id = this.generateRecordId(record);
-        logger.trace(`[ValidationService.spotCheckRecords] Checking if BigQuery record exists in Harper: id=${id}`);
-        const exists = await tables.BigQueryData.get(id);
+        const id = this.generateRecordId(record, timestampColumn);
+        logger.trace(`[ValidationService.spotCheckRecords] ${tableId} - Checking if BigQuery record exists in Harper: id=${id}`);
+        const exists = await targetTableObj.get(id);
         if (!exists) {
-          logger.warn(`[ValidationService.spotCheckRecords] Missing record - exists in BigQuery but not Harper: ${id}`);
+          logger.warn(`[ValidationService.spotCheckRecords] ${tableId} - Missing record: ${id}`);
           issues.push({
             type: 'missing_record',
-            timestamp: record.timestamp,
+            timestamp: record[timestampColumn],
             id,
-            message: 'Record exists in BigQuery but not in Harper'
+            message: 'Record exists in BigQuery but not in Harper',
+            tableId
           });
         }
       }
 
       const totalChecked = harperSample.length + bqSample.length;
       const status = issues.length === 0 ? 'healthy' : 'issues_found';
-      logger.info(`[ValidationService.spotCheckRecords] Spot check complete - status: ${status}, checked: ${totalChecked} records, issues: ${issues.length}`);
+      logger.info(`[ValidationService.spotCheckRecords] ${tableId} spot check complete - status: ${status}, checked: ${totalChecked} records, issues: ${issues.length}`);
 
       return {
         status,
@@ -241,25 +327,28 @@ export class ValidationService {
         issues,
         message: issues.length === 0
           ? `Checked ${totalChecked} records, all match`
-          : `Found ${issues.length} mismatches`
+          : `Found ${issues.length} mismatches`,
+        tableId
       };
 
     } catch (error) {
-      logger.error(`[ValidationService.spotCheckRecords] Spot check failed: ${error.message}`, error);
+      logger.error(`[ValidationService.spotCheckRecords] ${tableId} spot check failed: ${error.message}`, error);
       return {
         status: 'check_failed',
         message: 'Spot check failed',
-        error: error.message
+        error: error.message,
+        tableId
       };
     }
   }
 
-  generateRecordId(record) {
-    logger.trace(`[ValidationService.generateRecordId] Generating ID for validation - timestamp: ${record.timestamp}`);
+  generateRecordId(record, timestampColumn) {
+    const timestamp = record[timestampColumn];
+    logger.trace(`[ValidationService.generateRecordId] Generating ID for validation - ${timestampColumn}: ${timestamp}`);
     // Match the ID generation in sync-engine.js
     // Note: Adapt this to match your record's unique identifier strategy
     const hash = createHash('sha256')
-      .update(`${record.timestamp}-${record.id || ''}`)
+      .update(`${timestamp}-${record.id || ''}`)
       .digest('hex');
     const id = hash.substring(0, 16);
     logger.trace(`[ValidationService.generateRecordId] Generated ID: ${id}`);
@@ -273,7 +362,7 @@ export class ValidationService {
       timestamp: results.timestamp,
       nodeId: (await this.discoverCluster()).nodeId,
       status: results.overallStatus,
-      checkResults: JSON.stringify(results.checks),
+      checkResults: JSON.stringify(results.tables),
       message: results.error || 'Validation completed'
     };
     logger.debug(`[ValidationService.logAudit] Audit entry: ${JSON.stringify(auditEntry).substring(0, 200)}...`);

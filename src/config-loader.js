@@ -13,25 +13,156 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /**
- * Load configuration from config.yaml
- * @param {string|null} configPath - Optional path to config file
- * @returns {Object} Parsed configuration object
+ * Load configuration from config.yaml or accept a config object
+ * @param {string|Object|null} configPath - Path to config file or config object or options object
+ * @returns {Object} Parsed and normalized configuration object
  * @throws {Error} If config file cannot be read or parsed
  */
 export function loadConfig(configPath = null) {
   try {
-    // Default to config.yaml in project root
-    const path = configPath || join(__dirname, '..', 'config.yaml');
-    const fileContent = readFileSync(path, 'utf8');
-    const config = parse(fileContent);
+    let config;
 
-    if (!config) {
-      throw new Error('Failed to parse config.yaml');
+    // Handle different input types
+    if (configPath === null || configPath === undefined) {
+      // Default to config.yaml in project root
+      const path = join(__dirname, '..', 'config.yaml');
+      const fileContent = readFileSync(path, 'utf8');
+      config = parse(fileContent);
+    } else if (typeof configPath === 'string') {
+      // Path to config file
+      const fileContent = readFileSync(configPath, 'utf8');
+      config = parse(fileContent);
+    } else if (typeof configPath === 'object') {
+      // Config object passed directly (for testing)
+      // Check if it's an options object with 'config' property
+      if (configPath.config) {
+        config = configPath.config;
+      } else {
+        config = configPath;
+      }
+    } else {
+      throw new Error('configPath must be a string, object, or null');
     }
 
-    return config;
+    if (!config) {
+      throw new Error('Failed to parse configuration');
+    }
+
+    // Normalize to multi-table format if needed
+    return normalizeConfig(config);
   } catch (error) {
     throw new Error(`Failed to load configuration: ${error.message}`);
+  }
+}
+
+/**
+ * Normalizes configuration to multi-table format
+ * Converts legacy single-table configs to multi-table format
+ * @param {Object} config - Raw configuration object
+ * @returns {Object} Normalized configuration
+ * @private
+ */
+function normalizeConfig(config) {
+  if (!config.bigquery) {
+    throw new Error('bigquery section missing in configuration');
+  }
+
+  // Check if already in multi-table format
+  if (config.bigquery.tables && Array.isArray(config.bigquery.tables)) {
+    // Validate multi-table configuration
+    validateMultiTableConfig(config);
+    return config;
+  }
+
+  // Legacy single-table format - wrap in tables array
+  const legacyBigQueryConfig = config.bigquery;
+
+  // Extract table-specific config
+  const tableConfig = {
+    id: 'default',
+    dataset: legacyBigQueryConfig.dataset,
+    table: legacyBigQueryConfig.table,
+    timestampColumn: legacyBigQueryConfig.timestampColumn,
+    columns: legacyBigQueryConfig.columns || ['*'],
+    targetTable: 'VesselPositions', // Default Harper table name
+    sync: {
+      initialBatchSize: config.sync?.initialBatchSize,
+      catchupBatchSize: config.sync?.catchupBatchSize,
+      steadyBatchSize: config.sync?.steadyBatchSize
+    }
+  };
+
+  // Create normalized multi-table config
+  const normalizedConfig = {
+    bigquery: {
+      projectId: legacyBigQueryConfig.projectId,
+      credentials: legacyBigQueryConfig.credentials,
+      location: legacyBigQueryConfig.location,
+      tables: [tableConfig]
+    },
+    sync: {
+      pollInterval: config.sync?.pollInterval,
+      catchupThreshold: config.sync?.catchupThreshold,
+      steadyThreshold: config.sync?.steadyThreshold
+    }
+  };
+
+  return normalizedConfig;
+}
+
+/**
+ * Validates multi-table configuration
+ * @param {Object} config - Configuration to validate
+ * @throws {Error} If configuration is invalid
+ * @private
+ */
+function validateMultiTableConfig(config) {
+  if (!config.bigquery.tables || !Array.isArray(config.bigquery.tables)) {
+    throw new Error('bigquery.tables must be an array');
+  }
+
+  if (config.bigquery.tables.length === 0) {
+    throw new Error('bigquery.tables array cannot be empty');
+  }
+
+  const tableIds = new Set();
+  const targetTables = new Set();
+
+  for (const table of config.bigquery.tables) {
+    // Check required fields
+    if (!table.id) {
+      throw new Error('Missing required field: table.id');
+    }
+    if (!table.dataset) {
+      throw new Error(`Missing required field 'dataset' for table: ${table.id}`);
+    }
+    if (!table.table) {
+      throw new Error(`Missing required field 'table' for table: ${table.id}`);
+    }
+    if (!table.timestampColumn) {
+      throw new Error(`Missing required field 'timestampColumn' for table: ${table.id}`);
+    }
+    if (!table.targetTable) {
+      throw new Error(`Missing required field 'targetTable' for table: ${table.id}`);
+    }
+
+    // Check for duplicate IDs
+    if (tableIds.has(table.id)) {
+      throw new Error(`Duplicate table ID: ${table.id}`);
+    }
+    tableIds.add(table.id);
+
+    // Check for duplicate target Harper tables
+    if (targetTables.has(table.targetTable)) {
+      throw new Error(
+        `Duplicate targetTable '${table.targetTable}' for table: ${table.id}. ` +
+        `Each BigQuery table must sync to a DIFFERENT Harper table. ` +
+        `Multiple BigQuery tables syncing to the same targetTable will cause record ID collisions, ` +
+        `validation failures, and checkpoint confusion. If you need combined data, sync to separate ` +
+        `tables and join at query time.`
+      );
+    }
+    targetTables.add(table.targetTable);
   }
 }
 
@@ -50,7 +181,7 @@ export function getSynthesizerConfig(config = null) {
   }
 
   // Use bigquery settings as defaults, with optional synthesizer overrides
-  return {
+  const synthConfig = {
     // BigQuery connection (from bigquery section)
     projectId: fullConfig.bigquery.projectId,
     credentials: fullConfig.bigquery.credentials,
@@ -69,41 +200,110 @@ export function getSynthesizerConfig(config = null) {
     retentionDays: fullConfig.synthesizer?.retentionDays || 30,
     cleanupIntervalHours: fullConfig.synthesizer?.cleanupIntervalHours || 24
   };
+
+  // Include multi-table config if available (for CLI to detect mode)
+  if (fullConfig.bigquery.tables && Array.isArray(fullConfig.bigquery.tables)) {
+    synthConfig.multiTableConfig = fullConfig.bigquery.tables;
+  }
+
+  return synthConfig;
 }
 
 /**
  * Get BigQuery configuration for the plugin
- * Validates configuration and normalizes column selection
+ * Returns multi-table configuration with validated and normalized columns
  * @param {Object|null} config - Optional pre-loaded configuration
- * @returns {Object} Validated BigQuery configuration with normalized columns
+ * @returns {Object} Validated multi-table BigQuery configuration
  * @throws {Error} If configuration is invalid
  */
 export function getPluginConfig(config = null) {
   const fullConfig = config || loadConfig();
 
-  if (!fullConfig.bigquery) {
-    throw new Error('bigquery section missing in config.yaml');
+  if (!fullConfig || !fullConfig.bigquery) {
+    throw new Error(
+      'BigQuery configuration missing. Please ensure your config.yaml has a "bigquery" section ' +
+      'with required fields: projectId, credentials, dataset, table, timestampColumn. ' +
+      'See documentation for configuration examples.'
+    );
   }
 
-  // Validate and normalize columns (defaults to ['*'] if not specified)
-  const normalizedColumns = validateAndNormalizeColumns(
-    fullConfig.bigquery.columns,
-    fullConfig.bigquery.timestampColumn
-  );
+  // If tables is not present, the config needs to be normalized first
+  if (!fullConfig.bigquery.tables) {
+    // Run normalization to convert legacy format to multi-table
+    try {
+      const normalizedConfig = normalizeConfig(fullConfig);
+      return getPluginConfig(normalizedConfig);
+    } catch (error) {
+      throw new Error(
+        `Failed to normalize configuration: ${error.message}. ` +
+        'Please check that your config has required fields: dataset, table, timestampColumn, columns.'
+      );
+    }
+  }
+
+  // Config is already normalized to multi-table format by loadConfig
+  // Validate and normalize columns for each table
+  const tablesWithNormalizedColumns = fullConfig.bigquery.tables.map(table => {
+    const normalizedColumns = validateAndNormalizeColumns(
+      table.columns,
+      table.timestampColumn
+    );
+
+    return {
+      ...table,
+      columns: normalizedColumns
+    };
+  });
 
   return {
-    projectId: fullConfig.bigquery.projectId,
-    dataset: fullConfig.bigquery.dataset,
-    table: fullConfig.bigquery.table,
-    timestampColumn: fullConfig.bigquery.timestampColumn,
-    credentials: fullConfig.bigquery.credentials,
-    location: fullConfig.bigquery.location || 'US',
-    columns: normalizedColumns
+    bigquery: {
+      projectId: fullConfig.bigquery.projectId,
+      credentials: fullConfig.bigquery.credentials,
+      location: fullConfig.bigquery.location || 'US',
+      tables: tablesWithNormalizedColumns
+    },
+    sync: fullConfig.sync
+  };
+}
+
+/**
+ * Get configuration for a specific table
+ * @param {string} tableId - Table ID to get config for
+ * @param {Object|null} config - Optional pre-loaded configuration
+ * @returns {Object} Table-specific configuration
+ * @throws {Error} If table not found
+ */
+export function getTableConfig(tableId, config = null) {
+  const fullConfig = getPluginConfig(config);
+
+  const tableConfig = fullConfig.bigquery.tables.find(t => t.id === tableId);
+
+  if (!tableConfig) {
+    throw new Error(`Table configuration not found for ID: ${tableId}`);
+  }
+
+  return {
+    bigquery: {
+      projectId: fullConfig.bigquery.projectId,
+      dataset: tableConfig.dataset,
+      table: tableConfig.table,
+      timestampColumn: tableConfig.timestampColumn,
+      columns: tableConfig.columns,
+      credentials: fullConfig.bigquery.credentials,
+      location: fullConfig.bigquery.location
+    },
+    sync: {
+      ...fullConfig.sync,
+      ...tableConfig.sync // Table-specific sync settings override global
+    },
+    tableId: tableConfig.id,
+    targetTable: tableConfig.targetTable
   };
 }
 
 export default {
   loadConfig,
   getSynthesizerConfig,
-  getPluginConfig
+  getPluginConfig,
+  getTableConfig
 };

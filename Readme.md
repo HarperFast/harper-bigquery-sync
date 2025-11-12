@@ -17,11 +17,12 @@ See [System Overview](docs/SYSTEM-OVERVIEW.md) for how they work together, or ju
 
 ## Plugin Features
 
+- **Multi-Table Support**: Sync multiple BigQuery tables simultaneously with independent settings
 - **Horizontal Scalability**: Linear throughput increase with cluster size
 - **No Coordination**: Each node independently determines its workload
 - **Failure Recovery**: Local checkpoints enable independent node recovery
 - **Adaptive Polling**: Batch sizes adjust based on sync lag
-- **Continuous Validation**: Automatic data completeness checks
+- **Continuous Validation**: Automatic data completeness checks across all tables
 - **Native Replication**: Leverages Harper's clustering for data distribution ([docs](https://docs.harperdb.io/docs/developers/replication))
 - **Generic Storage**: Stores complete BigQuery records without schema constraints
 
@@ -83,6 +84,59 @@ Each node:
    ```
 
 ## Configuration
+
+### Multi-Table Support
+
+The plugin supports syncing **multiple BigQuery tables** simultaneously, each with independent sync settings:
+
+```yaml
+bigquery:
+  projectId: your-project
+  credentials: service-account-key.json
+  location: US
+
+  tables:
+    - id: vessel_positions
+      dataset: maritime_tracking
+      table: vessel_positions
+      timestampColumn: timestamp
+      columns: [timestamp, mmsi, latitude, longitude, speed_knots]
+      targetTable: VesselPositions
+      sync:
+        initialBatchSize: 10000
+        catchupBatchSize: 1000
+        steadyBatchSize: 500
+
+    - id: port_events
+      dataset: maritime_tracking
+      table: port_events
+      timestampColumn: event_time
+      columns: ['*']  # Fetch all columns
+      targetTable: PortEvents
+      sync:
+        initialBatchSize: 5000
+        catchupBatchSize: 500
+        steadyBatchSize: 100
+```
+
+**Key Features:**
+- Each table syncs to a separate Harper table
+- Independent batch sizes and sync rates per table
+- Different timestamp column names supported
+- Isolated checkpoints - one table failure doesn't affect others
+- Per-table validation and monitoring
+- Backward compatible with single-table configuration
+
+**Important Constraint:**
+Each BigQuery table MUST sync to a **different** Harper table. Multiple BigQuery tables syncing to the same Harper table is not supported and will cause:
+- Record ID collisions and data overwrites
+- Validation failures (can only validate one source)
+- Checkpoint confusion (different sync states)
+- Schema conflicts (mixed field sets)
+
+If you need to combine data from multiple BigQuery tables, sync them to separate Harper tables and join at query time.
+
+See `config.multi-table.yaml` for a complete example.
 
 ### Data Storage
 
@@ -263,17 +317,18 @@ Learn more about [Harper's storage architecture](https://docs.harperdb.io/docs/r
 
 ## Roadmap
 
-### 🐛 Crawl (Current - v1.0)
-**Status:** 🔨 In Progress
+### Crawl (v1.0 - Current)
+**Status:** Complete
 
 Single-threaded ingestion (one worker per Harper instance):
-- ✅ Modulo-based partitioning for distributed workload
-- ✅ One BigQuery table ingestion
-- ✅ Adaptive batch sizing (phase-based: initial/catchup/steady)
-- ✅ Checkpoint-based recovery per thread (`hostname-workerIndex`)
-- ✅ Durable thread identity (survives restarts)
-- ✅ Basic monitoring via GraphQL API (`/SyncControl`)
-- ⚠️  **Validation subsystem** (not yet complete - see src/validation.js)
+- Modulo-based partitioning for distributed workload
+- Multi-table ingestion support (each table syncs independently)
+- Adaptive batch sizing (phase-based: initial/catchup/steady)
+- Checkpoint-based recovery per table and node
+- Durable thread identity (survives restarts)
+- Monitoring via REST API (`/SyncControl`)
+- Validation subsystem with multi-table support
+- Column selection (fetch specific columns or all columns)
 
 **Current Limitations:**
 - Single worker thread per instance (supports multi-instance clusters)

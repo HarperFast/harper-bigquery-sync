@@ -93,6 +93,86 @@ describe('Config Loader', () => {
       assert.strictEqual(config.retentionDays, 60);
       assert.strictEqual(config.cleanupIntervalHours, 12);
     });
+
+    it('should not include multiTableConfig when tables array is absent', () => {
+      const mockConfig = {
+        bigquery: {
+          projectId: 'test-project',
+          dataset: 'test_dataset',
+          table: 'test_table',
+          credentials: 'test-key.json'
+        }
+      };
+
+      const config = getSynthesizerConfig(mockConfig);
+
+      assert.strictEqual(config.multiTableConfig, undefined);
+    });
+
+    it('should include multiTableConfig when tables array is present', () => {
+      const mockConfig = {
+        bigquery: {
+          projectId: 'test-project',
+          credentials: 'test-key.json',
+          location: 'US',
+          tables: [
+            {
+              id: 'table1',
+              dataset: 'dataset1',
+              table: 'table1',
+              timestampColumn: 'timestamp',
+              columns: ['*'],
+              targetTable: 'Table1'
+            },
+            {
+              id: 'table2',
+              dataset: 'dataset2',
+              table: 'table2',
+              timestampColumn: 'event_time',
+              columns: ['event_time', 'data'],
+              targetTable: 'Table2'
+            }
+          ]
+        },
+        synthesizer: {
+          dataset: 'dataset1',
+          table: 'table1'
+        }
+      };
+
+      const config = getSynthesizerConfig(mockConfig);
+
+      assert.ok(config.multiTableConfig, 'multiTableConfig should be present');
+      assert.strictEqual(config.multiTableConfig.length, 2);
+      assert.strictEqual(config.multiTableConfig[0].id, 'table1');
+      assert.strictEqual(config.multiTableConfig[1].id, 'table2');
+    });
+
+    it('should include multiTableConfig even without synthesizer overrides', () => {
+      const mockConfig = {
+        bigquery: {
+          projectId: 'test-project',
+          credentials: 'test-key.json',
+          location: 'US',
+          tables: [
+            {
+              id: 'vessel_positions',
+              dataset: 'maritime_tracking',
+              table: 'vessel_positions',
+              timestampColumn: 'timestamp',
+              columns: ['timestamp', 'mmsi'],
+              targetTable: 'VesselPositions'
+            }
+          ]
+        }
+      };
+
+      const config = getSynthesizerConfig(mockConfig);
+
+      assert.ok(config.multiTableConfig, 'multiTableConfig should be present');
+      assert.strictEqual(config.multiTableConfig.length, 1);
+      assert.strictEqual(config.multiTableConfig[0].id, 'vessel_positions');
+    });
   });
 
   describe('getPluginConfig', () => {

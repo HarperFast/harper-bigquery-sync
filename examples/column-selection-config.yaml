@@ -1,0 +1,195 @@
+# Column Selection Configuration Examples
+# Shows how to configure column selection for different use cases
+
+# ==============================================================================
+# Example 1: Select All Columns (Default)
+# ==============================================================================
+# Use when: You need complete data for analytics/data warehousing
+# Cost: Higher BigQuery scanning costs
+# Bandwidth: Higher network transfer
+# ==============================================================================
+bigquery:
+  projectId: your-project-id
+  dataset: maritime_tracking
+  table: vessel_positions
+  timestampColumn: timestamp
+  credentials: /path/to/service-account-key.json
+  location: US
+  # columns: "*"  # Default if omitted - selects all columns
+
+# ==============================================================================
+# Example 2: Minimal Location Tracking
+# ==============================================================================
+# Use when: Only need vessel positions for real-time tracking
+# Cost: ~80% savings on BigQuery scanning (4 columns vs ~20 columns)
+# Bandwidth: ~75% reduction in network transfer
+# ==============================================================================
+bigquery:
+  projectId: your-project-id
+  dataset: maritime_tracking
+  table: vessel_positions
+  timestampColumn: timestamp
+  credentials: /path/to/service-account-key.json
+  location: US
+  columns:
+    - timestamp      # Required for sync
+    - mmsi          # Vessel identifier
+    - latitude      # Position
+    - longitude     # Position
+
+# ==============================================================================
+# Example 3: Movement Analysis
+# ==============================================================================
+# Use when: Analyzing vessel speed, direction, and traffic patterns
+# Cost: ~65% savings (7 columns vs ~20 columns)
+# Bandwidth: ~65% reduction
+# ==============================================================================
+bigquery:
+  projectId: your-project-id
+  dataset: maritime_tracking
+  table: vessel_positions
+  timestampColumn: timestamp
+  credentials: /path/to/service-account-key.json
+  location: US
+  columns:
+    - timestamp
+    - mmsi
+    - latitude
+    - longitude
+    - speed_knots   # Velocity
+    - heading       # Direction vessel is pointing
+    - course        # Direction vessel is moving
+
+# ==============================================================================
+# Example 4: Vessel Identity & Registry
+# ==============================================================================
+# Use when: Building vessel database/registry without position data
+# Cost: ~65% savings (7 columns)
+# ==============================================================================
+bigquery:
+  projectId: your-project-id
+  dataset: maritime_tracking
+  table: vessel_positions
+  timestampColumn: timestamp
+  credentials: /path/to/service-account-key.json
+  location: US
+  columns:
+    - timestamp
+    - mmsi
+    - imo           # International Maritime Organization number
+    - vessel_name
+    - vessel_type
+    - flag          # Country flag
+    - callsign      # Radio callsign
+
+# ==============================================================================
+# Example 5: Comprehensive Monitoring
+# ==============================================================================
+# Use when: Need detailed vessel data but not full table
+# Cost: ~50% savings (10 columns)
+# ==============================================================================
+bigquery:
+  projectId: your-project-id
+  dataset: maritime_tracking
+  table: vessel_positions
+  timestampColumn: timestamp
+  credentials: /path/to/service-account-key.json
+  location: US
+  columns:
+    - timestamp
+    - mmsi
+    - vessel_name
+    - vessel_type
+    - latitude
+    - longitude
+    - speed_knots
+    - heading
+    - status        # Navigational status
+    - destination   # Destination port
+
+# ==============================================================================
+# Example 6: Port Activity Tracking
+# ==============================================================================
+# Use when: Monitoring vessel arrivals/departures at ports
+# Cost: ~70% savings (6 columns)
+# ==============================================================================
+bigquery:
+  projectId: your-project-id
+  dataset: maritime_tracking
+  table: vessel_positions
+  timestampColumn: timestamp
+  credentials: /path/to/service-account-key.json
+  location: US
+  columns:
+    - timestamp
+    - mmsi
+    - vessel_name
+    - status        # At anchor, moored, etc.
+    - port          # Current or nearest port
+    - eta           # Estimated time of arrival
+
+# ==============================================================================
+# Cost Savings Calculator
+# ==============================================================================
+#
+# Assumptions:
+# - Full table: 20 columns, 100 bytes/column average
+# - 1 million records synced
+# - BigQuery pricing: ~$6.25/TB scanned (as of 2024)
+#
+# Scenario Comparisons:
+#
+# 1. Full Table (20 columns)
+#    - Data scanned: 1.86 GB
+#    - Cost: ~$0.012 per sync
+#
+# 2. Minimal (4 columns - Example 2)
+#    - Data scanned: 0.37 GB
+#    - Cost: ~$0.002 per sync
+#    - Savings: 80% ($0.010 per sync)
+#
+# 3. Movement Analysis (7 columns - Example 3)
+#    - Data scanned: 0.65 GB
+#    - Cost: ~$0.004 per sync
+#    - Savings: 65% ($0.008 per sync)
+#
+# 4. Comprehensive (10 columns - Example 5)
+#    - Data scanned: 0.93 GB
+#    - Cost: ~$0.006 per sync
+#    - Savings: 50% ($0.006 per sync)
+#
+# For high-frequency syncing (e.g., every minute):
+# - Full table: ~$17/day, $518/month
+# - Minimal: ~$3/day, $86/month
+# - Savings: ~$432/month (83%)
+#
+# ==============================================================================
+
+# ==============================================================================
+# Configuration Notes
+# ==============================================================================
+#
+# 1. The timestampColumn MUST be included in the columns list
+#    (unless using wildcard "*")
+#
+# 2. Column names must match exactly with BigQuery schema
+#
+# 3. Invalid column names will cause BigQuery errors
+#
+# 4. Column selection doesn't affect data stored in Harper -
+#    only what's pulled from BigQuery
+#
+# 5. You can change column selection at any time -
+#    future syncs will use the new configuration
+#
+# ==============================================================================
+
+# Sync Configuration (applies to all examples above)
+sync:
+  pollInterval: 30000           # Poll every 30 seconds
+  initialBatchSize: 10000       # Large batches for initial backfill
+  catchupBatchSize: 1000        # Medium batches when catching up
+  steadyBatchSize: 500          # Small batches for real-time sync
+  startTimestamp: "2024-01-01T00:00:00Z"  # Where to start syncing from
+  catchupThreshold: 3600        # Seconds - lag > 1 hour = initial phase
+  steadyThreshold: 300          # Seconds - lag < 5 min = steady phase

@@ -89,12 +89,16 @@ export class SyncControl extends Resource {
         await globals.get('syncEngine').stop();
         logger.info('[SyncControl.post] Sync engine stopped successfully');
         return { message: 'Sync stopped' };
-      // TODO: Validation not yet implemented - requires additional testing
-      // case 'validate':
-      //   logger.info('[SyncControl.post] Triggering validation');
-      //   await globals.get('validator').runValidation();
-      //   logger.info('[SyncControl.post] Validation completed');
-      //   return { message: 'Validation triggered' };
+      case 'validate':
+        logger.info('[SyncControl.post] Triggering validation');
+        const validator = globals.get('validator');
+        if (!validator) {
+          logger.warn('[SyncControl.post] Validation not available - validator not initialized');
+          throw new Error('Validation service not available. Check configuration and logs.');
+        }
+        const results = await validator.runValidation();
+        logger.info('[SyncControl.post] Validation completed');
+        return { message: 'Validation triggered', results };
       default:
         logger.warn(`[SyncControl.post] Unknown action requested: ${action}`);
         throw new Error(`Unknown action: ${action}`);

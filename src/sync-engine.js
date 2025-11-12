@@ -18,6 +18,16 @@ export class SyncEngine {
 
     this.initialized = false;
     this.config = config;
+
+    // Multi-table support: tableId and targetTable
+    this.tableId = config.tableId || 'default';
+    this.targetTable = config.targetTable || 'VesselPositions';
+    this.timestampColumn = config.bigquery?.timestampColumn || config.timestampColumn || 'timestamp';
+
+    // Composite checkpoint ID: {tableId}_{nodeId}
+    // Will be set after cluster discovery determines nodeId
+    this.checkpointId = null;
+
     this.client = new BigQueryClient(this.config);
     this.running = false;
     this.nodeId = null;
@@ -25,6 +35,8 @@ export class SyncEngine {
     this.currentPhase = 'initial';
     this.lastCheckpoint = null;
     this.pollTimer = null;
+
+    logger.info(`[SyncEngine] Multi-table config - tableId: ${this.tableId}, targetTable: ${this.targetTable}`);
     logger.debug('[SyncEngine] Constructor complete - initial state set');
   }
   
@@ -39,7 +51,10 @@ export class SyncEngine {
       this.nodeId = clusterInfo.nodeId;
       this.clusterSize = clusterInfo.clusterSize;
 
-      logger.info(`[SyncEngine.initialize] Node initialized: ID=${this.nodeId}, ClusterSize=${this.clusterSize}`);
+      // Set composite checkpoint ID: {tableId}_{nodeId}
+      this.checkpointId = `${this.tableId}_${this.nodeId}`;
+
+      logger.info(`[SyncEngine.initialize] Node initialized: ID=${this.nodeId}, ClusterSize=${this.clusterSize}, CheckpointID=${this.checkpointId}`);
 
       // Load last checkpoint
       logger.debug('[SyncEngine.initialize] Loading checkpoint from database');
@@ -51,9 +66,20 @@ export class SyncEngine {
       } else {
         logger.info('[SyncEngine.initialize] No checkpoint found - starting fresh');
         // First run - start from beginning or configurable start time
+        // Store as ISO string - matches BigQuery TIMESTAMP() parameter format
+        const startTimestampString = this.config.sync.startTimestamp || '1970-01-01T00:00:00Z';
+
+        // Validate it's parseable
+        const testDate = new Date(startTimestampString);
+        if (Number.isNaN(testDate.getTime())) {
+          throw new Error(`Invalid startTimestamp in config: ${startTimestampString}`);
+        }
+
         this.lastCheckpoint = {
+          checkpointId: this.checkpointId,
+          tableId: this.tableId,
           nodeId: this.nodeId,
-          lastTimestamp: this.config.sync.startTimestamp || '1970-01-01T00:00:00Z',
+          lastTimestamp: startTimestampString,
           recordsIngested: 0,
           phase: 'initial'
         };
@@ -102,10 +128,21 @@ export class SyncEngine {
   }
   
   async loadCheckpoint() {
-    logger.debug(`[SyncEngine.loadCheckpoint] Attempting to load checkpoint for nodeId=${this.nodeId}`);
+    logger.debug(`[SyncEngine.loadCheckpoint] Attempting to load checkpoint for checkpointId=${this.checkpointId}`);
     try {
-      const checkpoint = await tables.SyncCheckpoint.get(this.nodeId);
+      const checkpoint = await tables.SyncCheckpoint.get(this.checkpointId);
       logger.debug(`[SyncEngine.loadCheckpoint] Checkpoint found: ${JSON.stringify(checkpoint)}`);
+
+      // Validate that lastTimestamp is a valid ISO string
+      if (checkpoint && checkpoint.lastTimestamp) {
+        const testDate = new Date(checkpoint.lastTimestamp);
+        if (Number.isNaN(testDate.getTime())) {
+          logger.error(`[SyncEngine.loadCheckpoint] Checkpoint contains invalid timestamp: ${checkpoint.lastTimestamp} - deleting corrupted checkpoint`);
+          await tables.SyncCheckpoint.delete(this.checkpointId);
+          return null;
+        }
+      }
+
       return checkpoint;
     } catch (error) {
       // If checkpoint not found, return null; otherwise log and rethrow so callers can handle it.
@@ -282,52 +319,31 @@ export class SyncEngine {
     }
 
     logger.info(`[SyncEngine.ingestRecords] Validated ${validRecords.length}/${records.length} records`);
-    // logger.debug(`[SyncEngine.ingestRecords] Cleaned Records: ` + validRecords);
 
-    // Batch write to Harper using internal API
+    // Batch write to Harper
     if (validRecords.length > 0) {
-      logger.info(`[SyncEngine.ingestRecords] Writing ${validRecords.length} records to Harper`);
+      logger.info(`[SyncEngine.ingestRecords] Writing ${validRecords.length} records to Harper table: ${this.targetTable}`);
 
-      // Debug: Log first record to see exact structure
-      const firstRecord = validRecords[0];
-      logger.info(`[SyncEngine.ingestRecords] First record keys: ${Object.keys(firstRecord).join(', ')}`);
-      logger.info(`[SyncEngine.ingestRecords] First record sample: ${JSON.stringify(firstRecord).substring(0, 500)}`);
-
-      // Check for undefined values
-      for (const [key, value] of Object.entries(firstRecord)) {
-        if (value === undefined) {
-          logger.error(`[SyncEngine.ingestRecords] Field '${key}' is undefined!`);
-        }
-      }
-
-      let lastResult; 
+      let lastResult;
       transaction((txn) => {
-        logger.info(`[SyncEngine.ingestRecords] Cleaned Records[0]: ${JSON.stringify(validRecords[0]).substring(0, 500)}`);
         try {
-          // logger.error(`[SyncEngine.ingestRecords] Records to create ${JSON.stringify(validRecords, null, 2)}`);
+          // Dynamic table access for multi-table support
+          const targetTableObj = tables[this.targetTable];
+          if (!targetTableObj) {
+            throw new Error(`Target table '${this.targetTable}' not found in schema`);
+          }
+
           for (const rec of validRecords) {
-            lastResult = tables.BigQueryData.create(rec);
+            lastResult = targetTableObj.create(rec);
           }
         } catch (error) {
-          // Always log full error detail
-          logger.error('[SyncEngine.ingestRecords] Harper create failed');
-          logger.error(`Error name: ${error.name}`);
-          logger.error(`Error message: ${error.message}`);
-          logger.error(`Error stack: ${error.stack}`);
-
-          // BigQuery often includes structured info
+          logger.error(`[SyncEngine.ingestRecords] Harper create failed: ${error.message}`, error);
           if (error.errors) {
-            for (const e of error.errors) {
-              logger.error(`BigQuery error reason: ${e.reason}`);
-              logger.error(`BigQuery error location: ${e.location}`);
-              logger.error(`BigQuery error message: ${e.message}`);
-            }
+            error.errors.forEach(e => logger.error(`  ${e.reason} at ${e.location}: ${e.message}`));
           }
         }
       });
-      logger.info('[SyncEngine.ingestRecords] Created validRecords in database/table, result:' + lastResult);
-
-      logger.info(`[SyncEngine.ingestRecords] Successfully wrote ${validRecords.length} records to BigQueryData table`);
+      logger.info(`[SyncEngine.ingestRecords] Successfully wrote ${validRecords.length} records`);
     } else {
       logger.warn('[SyncEngine.ingestRecords] No valid records to write');
     }
@@ -344,11 +360,43 @@ export class SyncEngine {
       throw new Error(`Missing timestamp column in last record: ${timestampColumn}`);
     }
 
-    // Convert Date object to ISO string for storage in checkpoint
-    const lastTimestampString = lastTimestamp instanceof Date ? lastTimestamp.toISOString() : String(lastTimestamp);
+    // Extract ISO string for BigQuery TIMESTAMP() parameter
+    // BigQuery returns various timestamp types - extract the ISO string representation
+    let lastTimestampString;
+
+    if (typeof lastTimestamp === 'string') {
+      // Already a string, use as-is
+      lastTimestampString = lastTimestamp;
+    } else if (lastTimestamp instanceof Date) {
+      // JavaScript Date object - convert to ISO
+      lastTimestampString = lastTimestamp.toISOString();
+    } else if (lastTimestamp && typeof lastTimestamp === 'object') {
+      // BigQuery timestamp object - try .value or .toJSON()
+      if (lastTimestamp.value) {
+        lastTimestampString = lastTimestamp.value;
+      } else if (typeof lastTimestamp.toJSON === 'function') {
+        lastTimestampString = lastTimestamp.toJSON();
+      } else {
+        // Last resort - try to stringify
+        lastTimestampString = String(lastTimestamp);
+      }
+    } else {
+      lastTimestampString = String(lastTimestamp);
+    }
+
+    // Validate it's a parseable timestamp
+    const testDate = new Date(lastTimestampString);
+    if (Number.isNaN(testDate.getTime())) {
+      logger.error(`[SyncEngine.updateCheckpoint] Invalid timestamp value: ${lastTimestamp} (type: ${typeof lastTimestamp})`);
+      throw new Error(`Invalid timestamp in last record: ${lastTimestampString}`);
+    }
+
     logger.debug(`[SyncEngine.updateCheckpoint] Last record timestamp: ${lastTimestampString}`);
 
+    // Store ISO string - matches BigQuery TIMESTAMP() parameter format
     this.lastCheckpoint = {
+      checkpointId: this.checkpointId,
+      tableId: this.tableId,
       nodeId: this.nodeId,
       lastTimestamp: lastTimestampString,
       recordsIngested: this.lastCheckpoint.recordsIngested + records.length,
@@ -419,6 +467,4 @@ export class SyncEngine {
 }
 
 // Export additional classes for use in resources.js
-// TODO: Validation not yet implemented - requires additional testing
-// export { ValidationService } from './validation.js';
 export { BigQueryClient } from './bigquery-client.js';

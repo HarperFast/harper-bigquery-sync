@@ -77,16 +77,21 @@ export class BigQueryClient {
    */
   async pullPartition({ nodeId, clusterSize, lastTimestamp, batchSize }) {
     logger.info(`[BigQueryClient.pullPartition] Pulling partition - nodeId: ${nodeId}, clusterSize: ${clusterSize}, batchSize: ${batchSize}`);
-    logger.debug(`[BigQueryClient.pullPartition] Query parameters - lastTimestamp: ${lastTimestamp} type: ${typeof(lastTimestamp)}, timestampColumn: ${this.timestampColumn}`);
+    logger.debug(`[BigQueryClient.pullPartition] Query parameters - lastTimestamp: ${lastTimestamp}, timestampColumn: ${this.timestampColumn}`);
 
     // Build query using QueryBuilder
     const query = this.queryBuilder.buildPullPartitionQuery();
+
+    // lastTimestamp is already an ISO string from checkpoint (String! type in schema)
+    // Just pass it directly to BigQuery's TIMESTAMP() parameter
+    const normalizedTimestamp = await this.normalizeToIso(lastTimestamp);
+    logger.debug(`[BigQueryClient.pullPartition] Normalized timestamp: ${normalizedTimestamp}`);
 
     // Resolve any promise parameters
     const params = await this.resolveParams({
       nodeId,
       clusterSize,
-      lastTimestamp,
+      lastTimestamp: normalizedTimestamp,
       batchSize,
     });
 
@@ -106,20 +111,11 @@ export class BigQueryClient {
       logger.debug(`[BigQueryClient.pullPartition] First row timestamp: ${rows.length > 0 ? Date(rows[0][this.timestampColumn]) : 'N/A'}`);
       return rows;
     } catch (error) {
-      // Always log full error detail
-      logger.error('[BigQueryClient.pullPartition] BigQuery query failed');
-      logger.error(`Error name: ${error.name}`);
-      logger.error(`Error message: ${error.message}`);
-      logger.error(`Error stack: ${error.stack}`);
-
-      // BigQuery often includes structured info
+      logger.error(`[BigQueryClient.pullPartition] BigQuery query failed: ${error.message}`, error);
       if (error.errors) {
-        for (const e of error.errors) {
-          logger.error(`BigQuery error reason: ${e.reason}`);
-          logger.error(`BigQuery error location: ${e.location}`);
-          logger.error(`BigQuery error message: ${e.message}`);
-        }
+        error.errors.forEach(e => logger.error(`  ${e.reason} at ${e.location}: ${e.message}`));
       }
+      throw error;
     }
   }
 
@@ -132,7 +128,13 @@ export class BigQueryClient {
   async normalizeToIso(ts) {
     if (ts == null) return null;
 
-    if (ts instanceof Date) return ts.toISOString();
+    if (ts instanceof Date) {
+      // Check if the Date is valid before calling toISOString()
+      if (Number.isNaN(ts.getTime())) {
+        throw new Error(`Invalid Date object: ${ts}`);
+      }
+      return ts.toISOString();
+    }
 
     if (typeof ts === 'number') return new Date(ts).toISOString();
 
@@ -198,10 +200,14 @@ export class BigQueryClient {
 
     logger.trace(`[BigQueryClient.verifyRecord] Verification query: ${query}`);
 
+    // Normalize timestamp to ISO string for BigQuery
+    // Records from Harper may have Date objects
+    const normalizedTimestamp = await this.normalizeToIso(record.timestamp);
+
     const options = {
       query,
       params: {
-        timestamp: record.timestamp,
+        timestamp: normalizedTimestamp,
         recordId: record.id
       }
     };
