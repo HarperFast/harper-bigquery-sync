@@ -60,7 +60,9 @@ bigquery:
         steadyBatchSize: 10
 
 # Maritime vessel data synthesizer configuration
-# Synthesizer generates data to the first table in bigquery.tables array
+# When bigquery.tables is present, synthesizer uses multi-table orchestrator
+# to generate data for ALL tables (vessel_positions, port_events, vessel_metadata).
+# The dataset/table fields below are used as defaults for single-table mode.
 synthesizer:
   dataset: maritime_tracking
   table: vessel_positions
