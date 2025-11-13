@@ -31,6 +31,11 @@ bigquery:
   credentials: service-account-key.json # Path to your service account key
   location: US
 
+  # Optional: Column selection (NEW) - fetch only specific columns to reduce costs
+  # Omit or use "*" to fetch all columns (default behavior)
+  # columns: [timestamp, mmsi, vessel_name, latitude, longitude]  # Must include timestampColumn
+  # columns: "*"  # Fetch all columns (default)
+
 # Optional: Override synthesizer settings (defaults shown below)
 synthesizer:
   # dataset: maritime_tracking           # Optional: Use different dataset (defaults to bigquery.dataset)

@@ -1,40 +1,76 @@
 # File: config.yaml
+# BigQuery Sync Configuration - Multi-Table Format
+#
+# This demonstrates v1.0 features: multi-table sync with column selection.
+# For legacy single-table format, see comments at bottom of file.
+
 pluginModule: ./src/index.js
 
 rest: true
 
 graphqlSchema:
   files: 'schema/harper-bigquery-sync.graphql'
-  # urlPath: 'harper-bigquery-sync'
 
 jsResource:
   files: 'src/resources.js'
-  # urlPath: 'harper-bigquery-sync'
 
+# Multi-Table BigQuery Configuration
 bigquery:
+  # Shared credentials and project settings
   projectId: irjudson-demo
+  credentials: service-account-key.json
+  location: US
+
+  # Define tables to sync (each syncs independently)
+  tables:
+    # High-frequency vessel position tracking
+    - id: vessel_positions
+      dataset: maritime_tracking
+      table: vessel_positions
+      timestampColumn: timestamp
+      columns: [timestamp, mmsi, vessel_name, latitude, longitude, speed_knots, heading, course]
+      targetTable: VesselPositions
+      sync:
+        initialBatchSize: 10000
+        catchupBatchSize: 1000
+        steadyBatchSize: 500
+
+    # Port arrival/departure events
+    - id: port_events
+      dataset: maritime_tracking
+      table: port_events
+      timestampColumn: event_time
+      columns: [event_time, port_id, port_name, vessel_mmsi, event_type, latitude, longitude]
+      targetTable: PortEvents
+      sync:
+        initialBatchSize: 5000
+        catchupBatchSize: 500
+        steadyBatchSize: 100
+
+    # Vessel metadata updates
+    - id: vessel_metadata
+      dataset: maritime_tracking
+      table: vessel_metadata
+      timestampColumn: last_updated
+      columns: ['*']
+      targetTable: VesselMetadata
+      sync:
+        initialBatchSize: 1000
+        catchupBatchSize: 100
+        steadyBatchSize: 10
+
+# Maritime vessel data synthesizer configuration
+# When bigquery.tables is present, synthesizer uses multi-table orchestrator
+# to generate data for ALL tables (vessel_positions, port_events, vessel_metadata).
+# The dataset/table fields below are used as defaults for single-table mode.
+synthesizer:
   dataset: maritime_tracking
   table: vessel_positions
-  timestampColumn: timestamp
-  credentials: service-account-key.json
-  location: US # BigQuery dataset location (US, EU, or specific region like us-central1)
-
-# Maritime vessel data synthesizer configuration (OPTIONAL)
-# Optional: Override target dataset/table (defaults to bigquery.dataset and bigquery.table)
-# By default, synthesizer uses the bigquery: section above (same dataset/table as plugin)
-# Uncomment settings below to override defaults for the synthesizer
-# synthesizer:
-# dataset: maritime_tracking
-# table: vessel_positions
-
-# Data generation settings (optional, these are the defaults)
-# totalVessels: 100000        # Total vessel pool size
-# batchSize: 100              # Vessel positions per batch
-# generationIntervalMs: 60000 # Time between batches (ms) - 60 seconds
-
-# Data retention (optional, these are the defaults)
-# retentionDays: 30           # How many days to keep data
-# cleanupIntervalHours: 24    # How often to run cleanup
+  totalVessels: 100000
+  batchSize: 100
+  generationIntervalMs: 60000
+  retentionDays: 30
+  cleanupIntervalHours: 24
 
 # Default settings
 sync:
@@ -61,3 +97,23 @@ retry:
   maxAttempts: 5
   backoffMultiplier: 2
   initialDelay: 1000 # milliseconds
+
+# ============================================================================
+# LEGACY SINGLE-TABLE FORMAT (still supported for backward compatibility)
+# ============================================================================
+# Uncomment and use this format if you only need to sync one table:
+#
+# bigquery:
+#   projectId: irjudson-demo
+#   dataset: maritime_tracking
+#   table: vessel_positions
+#   timestampColumn: timestamp
+#   credentials: service-account-key.json
+#   location: US
+#   columns: [timestamp, mmsi, vessel_name, latitude, longitude, speed_knots]
+#
+# sync:
+#   initialBatchSize: 10000
+#   catchupBatchSize: 1000
+#   steadyBatchSize: 500
+#   pollInterval: 30000

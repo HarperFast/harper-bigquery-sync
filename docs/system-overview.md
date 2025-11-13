@@ -24,6 +24,13 @@ bigquery:
   timestampColumn: timestamp
   credentials: service-account-key.json
   location: US
+
+  # Column selection (optional) - fetch only specific columns
+  # Omit or use "*" to fetch all columns (default behavior)
+  # When specified, timestampColumn MUST be included
+  columns: [timestamp, mmsi, vessel_name, latitude, longitude]
+  # OR
+  # columns: "*"  # Fetch all columns (default)
 ```
 
 ## 2. Maritime Vessel Data Synthesizer
@@ -189,6 +196,15 @@ Both use the same credentials, but read/write different datasets.
 - Both use BigQuery free tier efficiently
 - Load jobs instead of streaming inserts
 - Automatic cleanup of old data
+- **Column selection reduces data transfer costs** - fetch only needed fields
+
+### Column Selection (New!)
+
+- Select specific columns to sync from BigQuery
+- Reduces network transfer and query costs
+- Improves sync performance for large tables
+- Backward compatible - defaults to all columns
+- Example: Only sync `[timestamp, id, status]` instead of 50+ fields
 
 ## Configuration Reference
 
@@ -208,6 +224,11 @@ bigquery:
   dataset: source_dataset # Where to read from
   table: source_table
   timestampColumn: timestamp_field
+
+  # Optional: Select specific columns to reduce data transfer
+  columns: [timestamp_field, id, name, status] # Must include timestampColumn
+  # OR
+  # columns: "*"  # Fetch all columns (default)
 
 sync:
   initialBatchSize: 10000
@@ -239,6 +260,10 @@ harper-bigquery-sync/
 ├── src/                             # Plugin source code
 │   ├── index.js                     # Plugin entry point
 │   ├── sync-engine.js               # BigQuery sync engine
+│   ├── bigquery-client.js           # BigQuery API client with column selection
+│   ├── query-builder.js             # SQL query construction (NEW)
+│   ├── type-converter.js            # BigQuery type conversion (NEW)
+│   ├── validators.js                # Centralized validation (NEW)
 │   ├── validation.js                # Data validation
 │   ├── generator.js                 # Vessel data generator
 │   ├── bigquery.js                  # BigQuery writer

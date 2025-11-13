@@ -270,11 +270,119 @@ Examples:
 - **Throughput**: 100-1,000+ records/minute
 - **BigQuery**: Free tier compatible (uses load jobs)
 
+## Rolling Window Mode
+
+The synthesizer supports **rolling window mode** - a "set it and forget it" operation that automatically maintains a fixed N-day window of data.
+
+### How It Works
+
+When you run `npx maritime-data-synthesizer start`, the service:
+
+1. **Checks** current data state on startup
+2. **Backfills** automatically if data is missing or insufficient
+3. **Generates** new data continuously going forward
+4. **Cleans up** old data automatically beyond the retention window
+5. **Maintains** exactly N days of data indefinitely
+
+### Example Scenarios
+
+#### Fresh Start (No Data)
+
+```
+Checking data range (target: 30 days)...
+❌ No existing data found
+
+Action: Initializing with 30 days of historical data
+  • Will load ~4,320,000 records
+  • Estimated time: ~60 minutes
+
+✓ Initialization complete
+✓ Starting continuous generation
+✓ Rolling window active: 30 days
+```
+
+#### Partial Data (7 days)
+
+```
+Checking data range (target: 30 days)...
+✓ Found 1,008,000 records covering 7 days
+⚠️  Data window insufficient (7/30 days)
+
+Action: Backfilling 23 days
+  • Will load ~3,312,000 records
+
+✓ Backfill complete
+✓ Rolling window active: 30 days
+```
+
+#### Sufficient Data (30+ days)
+
+```
+Checking data range (target: 30 days)...
+✓ Found 4,320,000 records covering 30 days
+✓ Data window sufficient (30/30 days)
+
+✓ Starting continuous generation immediately
+✓ Rolling window active: 30 days
+```
+
+### Benefits
+
+**Zero Manual Intervention** - No need to run `initialize` before `start`. Just start the service and it handles everything.
+
+**Old workflow:**
+
+```bash
+npx maritime-data-synthesizer initialize 30  # Manual step
+npx maritime-data-synthesizer start          # Then start
+```
+
+**New workflow:**
+
+```bash
+npx maritime-data-synthesizer start          # That's it!
+```
+
+**Graceful Recovery** - Service can be stopped and restarted at any time. It will check current state, backfill if needed, and resume.
+
+**Consistent State** - Always maintains exactly N days of data:
+
+- New data continuously added at the front
+- Old data automatically removed from the back
+- Window size remains constant
+
+**Production-Ready** - Perfect for long-running deployments with no manual maintenance needed.
+
+### Configuration
+
+Rolling window behavior is controlled by `retentionDays` in `config.yaml`:
+
+```yaml
+synthesizer:
+  retentionDays: 30 # Target window size
+  cleanupIntervalHours: 24 # How often to clean up old data
+```
+
+### Skip Backfill
+
+To only generate new data without backfilling:
+
+```bash
+npx maritime-data-synthesizer start --no-backfill
+```
+
+This mode:
+
+- Skips data range check
+- No backfilling
+- Only generates new data going forward
+- Useful if you want manual control
+
 ## Documentation
 
-- **Quick Start**: `docs/QUICKSTART.md` - Get up and running in 5 minutes
-- **Full Guide**: `docs/maritime-data-synthesizer.md` - Comprehensive documentation
+- **Quick Start**: `docs/quickstart.md` - Get up and running in 5 minutes
 - **Config Reference**: See comments in `config.yaml`
+- **Rolling Window**: See "Rolling Window Mode" section above
 
 ## Use Cases
 

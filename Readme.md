@@ -17,11 +17,12 @@ See [System Overview](docs/SYSTEM-OVERVIEW.md) for how they work together, or ju
 
 ## Plugin Features
 
+- **Multi-Table Support**: Sync multiple BigQuery tables simultaneously with independent settings
 - **Horizontal Scalability**: Linear throughput increase with cluster size
 - **No Coordination**: Each node independently determines its workload
 - **Failure Recovery**: Local checkpoints enable independent node recovery
 - **Adaptive Polling**: Batch sizes adjust based on sync lag
-- **Continuous Validation**: Automatic data completeness checks
+- **Continuous Validation**: Automatic data completeness checks across all tables
 - **Native Replication**: Leverages Harper's clustering for data distribution ([docs](https://docs.harperdb.io/docs/developers/replication))
 - **Generic Storage**: Stores complete BigQuery records without schema constraints
 
@@ -34,13 +35,38 @@ See [System Overview](docs/SYSTEM-OVERVIEW.md) for how they work together, or ju
 - **Easy Testing**: Perfect for validating the BigQuery plugin with realistic workloads
 - **Shared Config**: Uses the same `config.yaml` as the plugin - no duplicate setup
 
-**Quick Start**: `npx maritime-data-synthesizer start` (auto-backfills and maintains rolling window)
+### Running the Synthesizer
 
-**Key Commands:**
+The maritime synthesizer generates test data TO BigQuery, which the plugin then syncs FROM BigQuery to Harper.
 
-- `start` - Auto-backfill and continuous generation (rolling window)
-- `clear` - Clear all data (keeps schema) - perfect for quick resets
+**Prerequisites:**
+
+1. GCP project with BigQuery enabled
+2. Service account key with BigQuery write permissions
+3. Update `config.yaml` with your BigQuery credentials
+
+**Quick Start:**
+
+```bash
+# Install dependencies (if not already done)
+npm install
+
+# Generate test data - auto-detects mode from config.yaml
+npx maritime-data-synthesizer initialize realistic
+```
+
+**Available Commands:**
+
+- `initialize <scenario>` - Generate test data (scenarios: small, realistic, stress)
+  - `small`: 100 positions, 10 events, 20 metadata (~1 hour of data)
+  - `realistic`: 10k positions, 500 events, 100 metadata (~24 hours)
+  - `stress`: 100k positions, 5k events, 1k metadata (~7 days)
+- `start` - Continuous generation with rolling window (single-table mode only)
+- `stats` - View BigQuery table statistics
+- `clear` - Clear all data (keeps schema)
 - `reset N` - Delete and reload with N days of data
+
+**Note:** Multi-table mode (current default config) supports `initialize` command. For continuous generation with `start`, use single-table config format.
 
 **Documentation:**
 
@@ -89,6 +115,61 @@ Each node:
    ```
 
 ## Configuration
+
+### Multi-Table Support
+
+The plugin supports syncing **multiple BigQuery tables** simultaneously, each with independent sync settings:
+
+```yaml
+bigquery:
+  projectId: your-project
+  credentials: service-account-key.json
+  location: US
+
+  tables:
+    - id: vessel_positions
+      dataset: maritime_tracking
+      table: vessel_positions
+      timestampColumn: timestamp
+      columns: [timestamp, mmsi, latitude, longitude, speed_knots]
+      targetTable: VesselPositions
+      sync:
+        initialBatchSize: 10000
+        catchupBatchSize: 1000
+        steadyBatchSize: 500
+
+    - id: port_events
+      dataset: maritime_tracking
+      table: port_events
+      timestampColumn: event_time
+      columns: ['*'] # Fetch all columns
+      targetTable: PortEvents
+      sync:
+        initialBatchSize: 5000
+        catchupBatchSize: 500
+        steadyBatchSize: 100
+```
+
+**Key Features:**
+
+- Each table syncs to a separate Harper table
+- Independent batch sizes and sync rates per table
+- Different timestamp column names supported
+- Isolated checkpoints - one table failure doesn't affect others
+- Per-table validation and monitoring
+- Backward compatible with single-table configuration
+
+**Important Constraint:**
+Each BigQuery table MUST sync to a **different** Harper table. Multiple BigQuery tables syncing to the same Harper table is not supported and will cause:
+
+- Record ID collisions and data overwrites
+- Validation failures (can only validate one source)
+- Checkpoint confusion (different sync states)
+- Schema conflicts (mixed field sets)
+
+If you need to combine data from multiple BigQuery tables, sync them to separate Harper tables and join at query time.
+
+See `config.multi-table.yaml` for a complete example.
 
 ### Data Storage
 
@@ -282,31 +363,69 @@ Learn more about [Harper's storage architecture](https://docs.harperdb.io/docs/r
 
 ## Roadmap
 
-### 🐛 Crawl (Current - v1.0)
+### Crawl (v1.0 - Complete)
 
-**Status:** 🔨 In Progress
+**Status:** ✅ Shipped
 
-Single-threaded ingestion (one worker per Harper instance):
+Single-threaded, single-table ingestion:
 
 - ✅ Modulo-based partitioning for distributed workload
-- ✅ One BigQuery table ingestion
 - ✅ Adaptive batch sizing (phase-based: initial/catchup/steady)
-- ✅ Checkpoint-based recovery per thread (`hostname-workerIndex`)
+- ✅ Checkpoint-based recovery per node
 - ✅ Durable thread identity (survives restarts)
-- ✅ Basic monitoring via GraphQL API (`/SyncControl`)
-- ⚠️ **Validation subsystem** (not yet complete - see src/validation.js)
+- ✅ Monitoring via REST API (`/SyncControl`)
 
-**Current Limitations:**
+### 🚶 Walk (v2.0 - Complete)
 
-- Single worker thread per instance (supports multi-instance clusters)
-- Manual cluster scaling coordination
-- Validation endpoint disabled (commented out in src/resources.js)
+**Status:** ✅ Shipped
 
-**Note:** The code already supports multiple worker threads per instance via `server.workerIndex`. Each thread gets a durable identity (`hostname-workerIndex`) that persists across restarts, enabling checkpoint-based recovery.
+Multi-table ingestion with column selection:
 
-### 🚶 Walk (Planned - v2.0)
+- ✅ **Multiple BigQuery tables** - Ingest from multiple tables simultaneously
+- ✅ **Column selection** - Choose specific columns per table (reduce data transfer)
+- ✅ **Per-table configuration** - Different batch sizes, intervals, and strategies per table
+- ✅ **Multi-table validation** - Independent validation per table
+- ✅ **Unified monitoring** - Single dashboard for all table ingestions
 
-**Status:** 🔨 In Development
+**Use Cases:**
+
+- Ingest multiple related datasets (e.g., vessels, ports, weather)
+- Reduce costs by selecting only needed columns
+- Different sync strategies per data type (real-time vs batch)
+
+**Configuration Example:**
+
+```yaml
+bigquery:
+  projectId: your-project
+  credentials: service-account-key.json
+  location: US
+
+  tables:
+    - id: vessel_positions
+      dataset: maritime_tracking
+      table: vessel_positions
+      columns: [mmsi, timestamp, latitude, longitude, speed_knots]
+      targetTable: VesselPositions
+      sync:
+        initialBatchSize: 10000
+        catchupBatchSize: 1000
+        steadyBatchSize: 500
+
+    - id: port_events
+      dataset: maritime_tracking
+      table: port_events
+      columns: [port_id, vessel_mmsi, event_type, timestamp]
+      targetTable: PortEvents
+      sync:
+        initialBatchSize: 5000
+        catchupBatchSize: 500
+        steadyBatchSize: 100
+```
+
+### 🏃 Run (v3.0 - Planned)
+
+**Status:** 📋 Future
 
 Multi-threaded, multi-instance Harper cluster support:
 
@@ -322,47 +441,7 @@ Multi-threaded, multi-instance Harper cluster support:
 - Better resource utilization per node
 - Automatic failover and rebalancing
 
-### 🏃 Run (Future - v3.0)
-
-**Status:** 📋 Planned
-
-Multi-table ingestion with column selection:
-
-- [ ] **Multiple BigQuery tables** - Ingest from multiple tables simultaneously
-- [ ] **Column selection** - Choose specific columns per table (reduce data transfer)
-- [ ] **Per-table configuration** - Different batch sizes, intervals, and strategies per table
-- [ ] **Data transformation** - Optional transformations during ingestion
-- [ ] **Unified monitoring** - Single dashboard for all table ingestions
-
-**Use Cases:**
-
-- Ingest multiple related datasets (e.g., vessels, ports, weather)
-- Reduce costs by selecting only needed columns
-- Different sync strategies per data type (real-time vs batch)
-
-**Example Configuration (Future):**
-
-```yaml
-bigquery:
-  projectId: your-project
-  credentials: service-account-key.json
-
-  tables:
-    - dataset: maritime_tracking
-      table: vessel_positions
-      columns: [mmsi, timestamp, latitude, longitude, speed_knots]
-      batchSize: 1000
-
-    - dataset: maritime_tracking
-      table: port_events
-      columns: [port_id, vessel_mmsi, event_type, timestamp]
-      batchSize: 500
-
-    - dataset: weather_data
-      table: marine_weather
-      columns: [location, timestamp, wind_speed, wave_height]
-      batchSize: 100
-```
+**Note:** The code already supports multiple worker threads per instance via `server.workerIndex`. Each thread gets a durable identity (`hostname-workerIndex`) that persists across restarts, enabling checkpoint-based recovery.
 
 ---
 

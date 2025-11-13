@@ -1,22 +1,31 @@
 # File: bigquery-ingestor.graphql
 # GraphQL schema definitions for tables
 
-# Raw data from BigQuery ingestion
-# BigQuery records are stored as-is with metadata fields
-# Harper will auto-generate 'id' field if not provided
-type BigQueryData @table {
+# Example tables - to be replaced with dynamic tables later
+type VesselPositions @table {
 	id: ID @primaryKey
 	# All BigQuery fields stored directly at top level
-	# Metadata fields:
-	# _syncedAt: Date @createdTime
+}
+
+type PortEvents @table {
+	id: ID @primaryKey
+	# All BigQuery fields stored directly at top level
+}
+
+type VesselMetadata @table {
+	id: ID @primaryKey
+	# All BigQuery fields stored directly at top level
 }
 
 # Checkpoint table for ingestion
+# Supports multi-table sync with composite checkpoint IDs
 type SyncCheckpoint @table {
-	nodeId: Int! @primaryKey
-	lastTimestamp: Date!
+	checkpointId: String! @primaryKey # Format: "{tableId}_{nodeId}" for multi-table, "{nodeId}" for single table
+	tableId: String! # Table identifier (e.g., "vessel_positions", "port_events")
+	nodeId: Int! # Node ID within cluster
+	lastTimestamp: String! # ISO 8601 string - matches BigQuery TIMESTAMP() parameter format
 	recordsIngested: Long!
-	lastSyncTime: Date!
+	lastSyncTime: String! # ISO 8601 string
 	phase: String!
 	batchSize: Int!
 }

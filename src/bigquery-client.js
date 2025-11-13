@@ -3,13 +3,31 @@
 // BigQuery API client with partition-aware queries
 
 import { BigQuery } from '@google-cloud/bigquery';
+import { QueryBuilder } from './query-builder.js';
 
+/**
+ * BigQuery client for fetching data with partition-aware queries
+ * Supports column selection and distributed workload partitioning
+ */
 export class BigQueryClient {
+	/**
+	 * Creates a new BigQueryClient instance
+	 * @param {Object} config - Configuration object
+	 * @param {Object} config.bigquery - BigQuery configuration
+	 * @param {string} config.bigquery.projectId - GCP project ID
+	 * @param {string} config.bigquery.dataset - BigQuery dataset name
+	 * @param {string} config.bigquery.table - BigQuery table name
+	 * @param {string} config.bigquery.timestampColumn - Timestamp column name
+	 * @param {string} config.bigquery.credentials - Path to credentials file
+	 * @param {string} config.bigquery.location - BigQuery location (e.g., 'US', 'EU')
+	 * @param {Array<string>} config.bigquery.columns - Columns to select (defaults to ['*'])
+	 */
 	constructor(config) {
 		logger.info('[BigQueryClient] Constructor called - initializing BigQuery client');
 		logger.debug(
 			`[BigQueryClient] Config - projectId: ${config.bigquery.projectId}, dataset: ${config.bigquery.dataset}, table: ${config.bigquery.table}, location: ${config.bigquery.location}`
 		);
+
 		this.config = config;
 		this.client = new BigQuery({
 			projectId: config.bigquery.projectId,
@@ -20,43 +38,62 @@ export class BigQueryClient {
 		this.dataset = config.bigquery.dataset;
 		this.table = config.bigquery.table;
 		this.timestampColumn = config.bigquery.timestampColumn;
-		logger.info('[BigQueryClient] Client initialized successfully');
+		this.columns = config.bigquery.columns || ['*'];
+
+		// Initialize query builder with column selection
+		this.queryBuilder = new QueryBuilder({
+			dataset: this.dataset,
+			table: this.table,
+			timestampColumn: this.timestampColumn,
+			columns: this.columns,
+		});
+
+		logger.info(`[BigQueryClient] Client initialized successfully with columns: ${this.queryBuilder.getColumnList()}`);
 	}
 
+	/**
+	 * Resolves all parameters that might be promises
+	 * @param {Object} params - Parameter object
+	 * @returns {Promise<Object>} Resolved parameters
+	 * @private
+	 */
 	async resolveParams(params) {
 		const entries = Object.entries(params);
 		const resolvedEntries = await Promise.all(entries.map(async ([key, value]) => [key, await value]));
 		return Object.fromEntries(resolvedEntries);
 	}
 
+	/**
+	 * Pulls a partition of data from BigQuery
+	 * Uses modulo-based partitioning for distributed workload
+	 * @param {Object} options - Query options
+	 * @param {number} options.nodeId - Current node ID (0-based)
+	 * @param {number} options.clusterSize - Total number of nodes
+	 * @param {string|Date} options.lastTimestamp - Last synced timestamp
+	 * @param {number} options.batchSize - Number of records to fetch
+	 * @returns {Promise<Array>} Array of records from BigQuery
+	 */
 	async pullPartition({ nodeId, clusterSize, lastTimestamp, batchSize }) {
 		logger.info(
 			`[BigQueryClient.pullPartition] Pulling partition - nodeId: ${nodeId}, clusterSize: ${clusterSize}, batchSize: ${batchSize}`
 		);
 		logger.debug(
-			`[BigQueryClient.pullPartition] Query parameters - lastTimestamp: ${lastTimestamp} type: ${typeof lastTimestamp}, timestampColumn: ${this.timestampColumn}`
+			`[BigQueryClient.pullPartition] Query parameters - lastTimestamp: ${lastTimestamp}, timestampColumn: ${this.timestampColumn}`
 		);
 
-		const query = `
-    SELECT *
-    FROM \`${this.dataset}.${this.table}\`
-    WHERE
-      -- guard + normalize types
-      CAST(@clusterSize AS INT64) > 0
-      AND CAST(@nodeId AS INT64) BETWEEN 0 AND CAST(@clusterSize AS INT64) - 1
-      -- sharding
-      AND MOD(UNIX_MICROS(${this.timestampColumn}), CAST(@clusterSize AS INT64)) = CAST(@nodeId AS INT64)
-      -- time filter
-      AND ${this.timestampColumn} > TIMESTAMP(@lastTimestamp)
-    ORDER BY ${this.timestampColumn} ASC
-    LIMIT CAST(@batchSize AS INT64)
-    `;
+		// Build query using QueryBuilder
+		const query = this.queryBuilder.buildPullPartitionQuery();
 
-		// Assume these might return Promises:
+		// lastTimestamp is already an ISO string from checkpoint (String! type in schema)
+		// Just pass it directly to BigQuery's TIMESTAMP() parameter
+		const normalizedTimestamp = await this.normalizeToIso(lastTimestamp);
+		logger.debug(`[BigQueryClient.pullPartition] Normalized timestamp: ${normalizedTimestamp}`);
+
+		// Resolve any promise parameters
 		const params = await this.resolveParams({
 			nodeId,
 			clusterSize,
-			lastTimestamp,
+			lastTimestamp: normalizedTimestamp,
 			batchSize,
 		});
 
@@ -78,27 +115,30 @@ export class BigQueryClient {
 			);
 			return rows;
 		} catch (error) {
-			// Always log full error detail
-			logger.error('[BigQueryClient.pullPartition] BigQuery query failed');
-			logger.error(`Error name: ${error.name}`);
-			logger.error(`Error message: ${error.message}`);
-			logger.error(`Error stack: ${error.stack}`);
-
-			// BigQuery often includes structured info
+			logger.error(`[BigQueryClient.pullPartition] BigQuery query failed: ${error.message}`, error);
 			if (error.errors) {
-				for (const e of error.errors) {
-					logger.error(`BigQuery error reason: ${e.reason}`);
-					logger.error(`BigQuery error location: ${e.location}`);
-					logger.error(`BigQuery error message: ${e.message}`);
-				}
+				error.errors.forEach((e) => logger.error(`  ${e.reason} at ${e.location}: ${e.message}`));
 			}
+			throw error;
 		}
 	}
 
+	/**
+	 * Normalizes a timestamp to ISO 8601 format
+	 * @param {Date|number|string|Object} ts - Timestamp to normalize
+	 * @returns {Promise<string|null>} ISO 8601 formatted timestamp
+	 * @throws {Error} If timestamp cannot be parsed
+	 */
 	async normalizeToIso(ts) {
 		if (ts === null || ts === undefined) return null;
 
-		if (ts instanceof Date) return ts.toISOString();
+		if (ts instanceof Date) {
+			// Check if the Date is valid before calling toISOString()
+			if (Number.isNaN(ts.getTime())) {
+				throw new Error(`Invalid Date object: ${ts}`);
+			}
+			return ts.toISOString();
+		}
 
 		if (typeof ts === 'number') return new Date(ts).toISOString();
 
@@ -115,19 +155,20 @@ export class BigQueryClient {
 		throw new Error(`Unsupported lastTimestamp type: ${typeof ts}`);
 	}
 
+	/**
+	 * Counts records in a partition
+	 * @param {Object} options - Query options
+	 * @param {number} options.nodeId - Current node ID (0-based)
+	 * @param {number} options.clusterSize - Total number of nodes
+	 * @returns {Promise<number>} Count of records in partition
+	 */
 	async countPartition({ nodeId, clusterSize }) {
 		logger.info(
 			`[BigQueryClient.countPartition] Counting partition records - nodeId: ${nodeId}, clusterSize: ${clusterSize}`
 		);
 
-		const query = `
-      SELECT COUNT(*) as count
-      FROM \`${this.dataset}.${this.table}\`
-      WHERE MOD(
-        ABS(FARM_FINGERPRINT(CAST(${this.timestampColumn} AS STRING))),
-        @clusterSize
-      ) = @nodeId
-    `;
+		// Build query using QueryBuilder
+		const query = this.queryBuilder.buildCountPartitionQuery();
 
 		logger.trace(`[BigQueryClient.countPartition] Count query: ${query}`);
 
@@ -152,24 +193,29 @@ export class BigQueryClient {
 		}
 	}
 
+	/**
+	 * Verifies that a specific record exists in BigQuery
+	 * @param {Object} record - Record to verify
+	 * @param {string} record.timestamp - Record timestamp
+	 * @param {string} record.id - Record ID
+	 * @returns {Promise<boolean>} True if record exists, false otherwise
+	 */
 	async verifyRecord(record) {
 		logger.debug(`[BigQueryClient.verifyRecord] Verifying record - timestamp: ${record.timestamp}`);
-		// Verify a specific record exists in BigQuery by timestamp and unique identifier
-		// Note: This assumes a unique identifier field exists - adapt to your schema
-		const query = `
-      SELECT 1
-      FROM \`${this.dataset}.${this.table}\`
-      WHERE ${this.timestampColumn} = @timestamp
-        AND id = @recordId
-      LIMIT 1
-    `;
+
+		// Build query using QueryBuilder
+		const query = this.queryBuilder.buildVerifyRecordQuery();
 
 		logger.trace(`[BigQueryClient.verifyRecord] Verification query: ${query}`);
+
+		// Normalize timestamp to ISO string for BigQuery
+		// Records from Harper may have Date objects
+		const normalizedTimestamp = await this.normalizeToIso(record.timestamp);
 
 		const options = {
 			query,
 			params: {
-				timestamp: record.timestamp,
+				timestamp: normalizedTimestamp,
 				recordId: record.id,
 			},
 		};
