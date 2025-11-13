@@ -368,3 +368,4 @@ Press `Ctrl+C` in the terminal running the synthesizer. It will:
 - Verify config.yaml syntax (must be valid YAML)
 - Ensure BigQuery permissions are correct
 - Look at the full docs in `docs/maritime-data-synthesizer.md`
+

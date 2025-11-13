@@ -193,3 +193,4 @@ sync:
   startTimestamp: "2024-01-01T00:00:00Z"  # Where to start syncing from
   catchupThreshold: 3600        # Seconds - lag > 1 hour = initial phase
   steadyThreshold: 300          # Seconds - lag < 5 min = steady phase
+

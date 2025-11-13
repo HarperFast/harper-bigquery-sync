@@ -487,3 +487,4 @@ export class SyncEngine {
 
 // Export additional classes for use in resources.js
 export { BigQueryClient } from './bigquery-client.js';
+

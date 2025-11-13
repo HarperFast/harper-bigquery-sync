@@ -473,3 +473,4 @@ export class VesselMetadataGenerator {
 }
 
 export default VesselMetadataGenerator;
+

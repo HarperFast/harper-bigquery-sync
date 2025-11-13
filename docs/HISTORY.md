@@ -112,3 +112,4 @@ Merged feature/column-selection into main, completing Phase 1:
 - Cleanup/retention for multi-table
 - Dynamic Harper table creation via Operations API
 - Streaming insert API option for production deployments
+

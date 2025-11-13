@@ -321,3 +321,4 @@ async function runMultiTableMode(command, arg, config) {
 }
 
 main();
+

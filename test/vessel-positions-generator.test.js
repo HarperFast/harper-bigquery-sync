@@ -231,3 +231,4 @@ describe('VesselPositionsGenerator', () => {
 		});
 	});
 });
+

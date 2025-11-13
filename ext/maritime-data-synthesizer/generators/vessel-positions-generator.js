@@ -58,3 +58,4 @@ export class VesselPositionsGenerator {
 		return this.generate(totalRecords);
 	}
 }
+

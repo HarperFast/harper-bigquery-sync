@@ -528,3 +528,4 @@ class MaritimeDataSynthesizer extends EventEmitter {
 }
 
 export default MaritimeDataSynthesizer;
+

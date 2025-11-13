@@ -320,3 +320,4 @@ npx maritime-data-synthesizer reset 30
 ---
 
 **The power of synthetic data + cloud data pipelines** 🚀
+

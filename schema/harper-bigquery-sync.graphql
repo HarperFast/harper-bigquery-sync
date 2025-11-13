@@ -42,3 +42,4 @@ type SyncAudit @table {
 	reason: String
 	recordSample: String
 }
+

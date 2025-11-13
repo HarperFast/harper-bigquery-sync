@@ -304,3 +304,4 @@ export default {
 	getPluginConfig,
 	getTableConfig,
 };
+

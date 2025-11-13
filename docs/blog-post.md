@@ -467,3 +467,4 @@ See [docs/QUICKSTART.md](docs/QUICKSTART.md) for the 5-minute setup guide or [MA
 - [Design Document](#) — Full technical details
 - [GitHub Repository](#) — Complete implementation
 - [HarperDB Docs](https://docs.harperdb.io) — Platform documentation
+
