@@ -23,7 +23,7 @@
 		"./config": "./config.yaml"
 	},
 	"bin": {
-		"maritime-data-synthesizer": "./bin/cli.js"
+		"maritime-data-synthesizer": "./tools/maritime-data-synthesizer/cli.js"
 	},
 	"files": [
 		"dist/",

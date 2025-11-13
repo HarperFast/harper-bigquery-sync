@@ -9,9 +9,9 @@
  * This is a standalone utility - the main BigQuery sync plugin is in src/
  */
 
-import { MaritimeDataSynthesizer } from '../src/maritime-synthesizer.js';
-import { MultiTableOrchestrator } from '../tools/maritime-data-synthesizer/multi-table-orchestrator.js';
-import { getSynthesizerConfig } from '../src/config-loader.js';
+import { MaritimeDataSynthesizer } from '../../src/maritime-synthesizer.js';
+import { MultiTableOrchestrator } from './multi-table-orchestrator.js';
+import { getSynthesizerConfig } from '../../src/config-loader.js';
 
 const COMMANDS = {
 	initialize: 'Initialize BigQuery resources and load historical data',
