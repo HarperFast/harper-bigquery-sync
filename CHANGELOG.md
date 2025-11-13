@@ -121,4 +121,3 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for how to contribute changes.
 - **Issues**: https://github.com/harperdb/bigquery-sync/issues
 - **Discussions**: https://github.com/harperdb/bigquery-sync/discussions
 - **Email**: opensource@harperdb.io
-

@@ -60,4 +60,3 @@ For integration testing with live BigQuery and Harper instances, see:
 
 - `examples/test-bigquery-config.js` - Tests BigQuery connection
 - Manual testing with `npx maritime-data-synthesizer start`
-

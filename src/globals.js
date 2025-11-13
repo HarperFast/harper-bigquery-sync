@@ -19,4 +19,3 @@ const globals = new Globals();
 export { globals, Globals };
 
 export default Globals;
-

@@ -147,4 +147,3 @@ export default {
 	convertBigInt,
 	convertBigQueryTimestamp,
 };
-

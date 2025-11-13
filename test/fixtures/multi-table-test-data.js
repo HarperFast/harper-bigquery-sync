@@ -188,4 +188,3 @@ export default {
 	EVENT_TYPES,
 	VESSEL_STATUSES,
 };
-

@@ -583,4 +583,3 @@ async function _syncTable(tableConfig, client) {
 	await engine.initialize();
 	await engine.syncOnce();
 }
-

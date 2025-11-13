@@ -138,4 +138,3 @@ export class SyncControl extends Resource {
 		}
 	}
 }
-

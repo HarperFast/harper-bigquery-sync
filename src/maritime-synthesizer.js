@@ -10,4 +10,3 @@ import MaritimeBigQueryClient from './bigquery.js';
 export { MaritimeDataSynthesizer, MaritimeVesselGenerator, MaritimeBigQueryClient };
 
 export default MaritimeDataSynthesizer;
-

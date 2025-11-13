@@ -475,4 +475,3 @@ class MaritimeVesselGenerator {
 }
 
 export default MaritimeVesselGenerator;
-

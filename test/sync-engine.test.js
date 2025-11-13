@@ -319,4 +319,3 @@ describe('Sync Engine', () => {
 		});
 	});
 });
-

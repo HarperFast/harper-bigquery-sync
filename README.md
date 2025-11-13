@@ -98,6 +98,7 @@ For local development and testing:
    npm install
    ```
 4. Configure `config.yaml` with your BigQuery credentials:
+
    ```yaml
    bigquery:
      projectId: your-project
@@ -112,6 +113,7 @@ For local development and testing:
          columns: ['*']
          targetTable: BigQueryData
    ```
+
 5. Run in development mode:
    ```bash
    harper dev .
@@ -457,4 +459,3 @@ Multi-threaded, multi-instance Harper cluster support:
 **Get Started:** Deploy on [Harper Fabric](https://fabric.harper.fast) - free tier available, no credit card required.
 
 **Learn More:** [Harper Documentation](https://docs.harperdb.io) | [harperdb.io](https://harperdb.io)
-

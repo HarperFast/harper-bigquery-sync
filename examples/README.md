@@ -53,4 +53,3 @@ node examples/<script-name>.js
 ```
 
 Some examples require configuration in `config.yaml` or `.env` file.
-

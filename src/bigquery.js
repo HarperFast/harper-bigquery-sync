@@ -362,4 +362,3 @@ class MaritimeBigQueryClient {
 }
 
 export default MaritimeBigQueryClient;
-
