@@ -13,7 +13,7 @@ This repository contains two components:
 1. **BigQuery Plugin** - Syncs data FROM BigQuery INTO Harper
 2. **Maritime Data Synthesizer** - Generates synthetic vessel data TO BigQuery for testing
 
-See [System Overview](docs/SYSTEM-OVERVIEW.md) for how they work together, or jump to [Maritime Synthesizer Quick Start](docs/QUICKSTART.md) to start generating test data in 5 minutes.
+See [System Overview](docs/system-overview.md) for how they work together, or jump to [Maritime Synthesizer Quick Start](docs/quickstart.md) to start generating test data in 5 minutes.
 
 ## Plugin Features
 
@@ -70,10 +70,9 @@ npx maritime-data-synthesizer initialize realistic
 
 **Documentation:**
 
-- **[5-Minute Quick Start](docs/QUICKSTART.md)** - Get generating data immediately
-- **[System Overview](docs/SYSTEM-OVERVIEW.md)** - How plugin + synthesizer work together
-- **[Full Guide](docs/maritime-data-synthesizer.md)** - Comprehensive synthesizer documentation
-- **[Feature Overview](docs/MARITIME-SYNTHESIZER-README.md)** - Use cases and examples
+- **[5-Minute Quick Start](docs/quickstart.md)** - Get generating data immediately
+- **[System Overview](docs/system-overview.md)** - How plugin + synthesizer work together
+- **[Full Guide](docs/maritime-synthesizer.md)** - Comprehensive synthesizer documentation
 
 ## Architecture
 
