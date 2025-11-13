@@ -175,8 +175,8 @@ describe('Config Loader', () => {
 		});
 	});
 
-	describe('getPluginConfig', () => {
-		it('should extract basic BigQuery config', () => {
+	describe('getPluginConfig - Legacy single-table format', () => {
+		it('should extract basic BigQuery config from legacy format', () => {
 			const mockConfig = {
 				bigquery: {
 					projectId: 'test-project',
@@ -190,12 +190,15 @@ describe('Config Loader', () => {
 
 			const config = getPluginConfig(mockConfig);
 
-			assert.strictEqual(config.projectId, 'test-project');
-			assert.strictEqual(config.dataset, 'test_dataset');
-			assert.strictEqual(config.table, 'test_table');
-			assert.strictEqual(config.timestampColumn, 'timestamp');
-			assert.strictEqual(config.credentials, 'test-key.json');
-			assert.strictEqual(config.location, 'US');
+			// getPluginConfig normalizes to multi-table format
+			assert.strictEqual(config.bigquery.projectId, 'test-project');
+			assert.strictEqual(config.bigquery.credentials, 'test-key.json');
+			assert.strictEqual(config.bigquery.location, 'US');
+			assert.ok(Array.isArray(config.bigquery.tables));
+			assert.strictEqual(config.bigquery.tables.length, 1);
+			assert.strictEqual(config.bigquery.tables[0].dataset, 'test_dataset');
+			assert.strictEqual(config.bigquery.tables[0].table, 'test_table');
+			assert.strictEqual(config.bigquery.tables[0].timestampColumn, 'timestamp');
 		});
 
 		it('should default to wildcard columns when not specified', () => {
@@ -212,7 +215,7 @@ describe('Config Loader', () => {
 
 			const config = getPluginConfig(mockConfig);
 
-			assert.deepStrictEqual(config.columns, ['*']);
+			assert.deepStrictEqual(config.bigquery.tables[0].columns, ['*']);
 		});
 
 		it('should normalize columns array', () => {
@@ -230,7 +233,7 @@ describe('Config Loader', () => {
 
 			const config = getPluginConfig(mockConfig);
 
-			assert.deepStrictEqual(config.columns, ['timestamp', 'mmsi', 'latitude', 'longitude']);
+			assert.deepStrictEqual(config.bigquery.tables[0].columns, ['timestamp', 'mmsi', 'latitude', 'longitude']);
 		});
 
 		it('should normalize wildcard string to array', () => {
@@ -248,7 +251,7 @@ describe('Config Loader', () => {
 
 			const config = getPluginConfig(mockConfig);
 
-			assert.deepStrictEqual(config.columns, ['*']);
+			assert.deepStrictEqual(config.bigquery.tables[0].columns, ['*']);
 		});
 
 		it('should throw error when timestamp column not in column list', () => {
@@ -299,7 +302,135 @@ describe('Config Loader', () => {
 
 			const config = getPluginConfig(mockConfig);
 
-			assert.strictEqual(config.location, 'US');
+			assert.strictEqual(config.bigquery.location, 'US');
+		});
+	});
+
+	describe('getPluginConfig - Multi-table format', () => {
+		it('should handle multi-table config format', () => {
+			const mockConfig = {
+				bigquery: {
+					projectId: 'test-project',
+					credentials: 'test-key.json',
+					location: 'EU',
+					tables: [
+						{
+							id: 'vessel_positions',
+							dataset: 'maritime',
+							table: 'positions',
+							timestampColumn: 'timestamp',
+							targetTable: 'VesselPositions',
+							columns: ['timestamp', 'mmsi', 'latitude', 'longitude'],
+						},
+						{
+							id: 'port_events',
+							dataset: 'maritime',
+							table: 'events',
+							timestampColumn: 'event_time',
+							targetTable: 'PortEvents',
+							columns: ['*'],
+						},
+					],
+				},
+				sync: {
+					pollInterval: 30000,
+				},
+			};
+
+			const config = getPluginConfig(mockConfig);
+
+			assert.strictEqual(config.bigquery.projectId, 'test-project');
+			assert.strictEqual(config.bigquery.credentials, 'test-key.json');
+			assert.strictEqual(config.bigquery.location, 'EU');
+			assert.ok(Array.isArray(config.bigquery.tables));
+			assert.strictEqual(config.bigquery.tables.length, 2);
+
+			// First table
+			assert.strictEqual(config.bigquery.tables[0].id, 'vessel_positions');
+			assert.strictEqual(config.bigquery.tables[0].dataset, 'maritime');
+			assert.strictEqual(config.bigquery.tables[0].table, 'positions');
+			assert.strictEqual(config.bigquery.tables[0].timestampColumn, 'timestamp');
+			assert.strictEqual(config.bigquery.tables[0].targetTable, 'VesselPositions');
+			assert.deepStrictEqual(config.bigquery.tables[0].columns, ['timestamp', 'mmsi', 'latitude', 'longitude']);
+
+			// Second table
+			assert.strictEqual(config.bigquery.tables[1].id, 'port_events');
+			assert.strictEqual(config.bigquery.tables[1].dataset, 'maritime');
+			assert.strictEqual(config.bigquery.tables[1].table, 'events');
+			assert.strictEqual(config.bigquery.tables[1].timestampColumn, 'event_time');
+			assert.strictEqual(config.bigquery.tables[1].targetTable, 'PortEvents');
+			assert.deepStrictEqual(config.bigquery.tables[1].columns, ['*']);
+		});
+
+		it('should normalize wildcard string in multi-table format', () => {
+			const mockConfig = {
+				bigquery: {
+					projectId: 'test-project',
+					credentials: 'test-key.json',
+					location: 'US',
+					tables: [
+						{
+							id: 'vessels',
+							dataset: 'maritime',
+							table: 'vessels',
+							timestampColumn: 'ts',
+							targetTable: 'Vessels',
+							columns: '*', // String instead of array
+						},
+					],
+				},
+			};
+
+			const config = getPluginConfig(mockConfig);
+
+			assert.deepStrictEqual(config.bigquery.tables[0].columns, ['*']);
+		});
+
+		it('should validate timestamp column is in columns list for multi-table', () => {
+			const mockConfig = {
+				bigquery: {
+					projectId: 'test-project',
+					credentials: 'test-key.json',
+					tables: [
+						{
+							id: 'vessels',
+							dataset: 'maritime',
+							table: 'vessels',
+							timestampColumn: 'timestamp',
+							targetTable: 'Vessels',
+							columns: ['mmsi', 'latitude'], // missing timestamp
+						},
+					],
+				},
+			};
+
+			assert.throws(() => getPluginConfig(mockConfig), {
+				message: /Timestamp column 'timestamp' must be included in columns list/,
+			});
+		});
+
+		it('should default location to US in multi-table format', () => {
+			const mockConfig = {
+				bigquery: {
+					projectId: 'test-project',
+					credentials: 'test-key.json',
+					// location not specified
+					tables: [
+						{
+							id: 'vessels',
+							dataset: 'maritime',
+							table: 'vessels',
+							timestampColumn: 'ts',
+							targetTable: 'Vessels',
+							columns: ['*'],
+						},
+					],
+				},
+			};
+
+			const config = getPluginConfig(mockConfig);
+
+			assert.strictEqual(config.bigquery.location, 'US');
 		});
 	});
 });
