@@ -28,26 +28,26 @@ The Maritime Vessel Data Synthesizer generates realistic synthetic tracking data
 
 Each vessel position record includes:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `mmsi` | STRING | 9-digit Maritime Mobile Service Identity |
-| `imo` | STRING | 7-digit International Maritime Organization number |
-| `vessel_name` | STRING | Vessel name (e.g., "MV OCEAN FORTUNE 42") |
-| `vessel_type` | STRING | CONTAINER, BULK_CARRIER, TANKER, CARGO, PASSENGER, FISHING |
-| `flag` | STRING | Two-letter country code |
-| `length` | INTEGER | Vessel length in meters |
-| `beam` | INTEGER | Vessel width in meters |
-| `draft` | FLOAT | Vessel draft (depth) in meters |
-| `latitude` | FLOAT | Current latitude (-90 to 90) |
-| `longitude` | FLOAT | Current longitude (-180 to 180) |
-| `speed_knots` | FLOAT | Current speed in knots |
-| `course` | INTEGER | Direction of travel (0-360 degrees) |
-| `heading` | INTEGER | Vessel heading (0-360 degrees) |
-| `status` | STRING | Vessel operational status |
-| `destination` | STRING | Destination port name |
-| `eta` | TIMESTAMP | Estimated time of arrival |
-| `timestamp` | TIMESTAMP | Record timestamp |
-| `report_date` | STRING | Date in YYYYMMDD format |
+| Field         | Type      | Description                                                |
+| ------------- | --------- | ---------------------------------------------------------- |
+| `mmsi`        | STRING    | 9-digit Maritime Mobile Service Identity                   |
+| `imo`         | STRING    | 7-digit International Maritime Organization number         |
+| `vessel_name` | STRING    | Vessel name (e.g., "MV OCEAN FORTUNE 42")                  |
+| `vessel_type` | STRING    | CONTAINER, BULK_CARRIER, TANKER, CARGO, PASSENGER, FISHING |
+| `flag`        | STRING    | Two-letter country code                                    |
+| `length`      | INTEGER   | Vessel length in meters                                    |
+| `beam`        | INTEGER   | Vessel width in meters                                     |
+| `draft`       | FLOAT     | Vessel draft (depth) in meters                             |
+| `latitude`    | FLOAT     | Current latitude (-90 to 90)                               |
+| `longitude`   | FLOAT     | Current longitude (-180 to 180)                            |
+| `speed_knots` | FLOAT     | Current speed in knots                                     |
+| `course`      | INTEGER   | Direction of travel (0-360 degrees)                        |
+| `heading`     | INTEGER   | Vessel heading (0-360 degrees)                             |
+| `status`      | STRING    | Vessel operational status                                  |
+| `destination` | STRING    | Destination port name                                      |
+| `eta`         | TIMESTAMP | Estimated time of arrival                                  |
+| `timestamp`   | TIMESTAMP | Record timestamp                                           |
+| `report_date` | STRING    | Date in YYYYMMDD format                                    |
 
 ## Installation
 
@@ -84,17 +84,20 @@ CLEANUP_INTERVAL_HOURS=24        # Clean up old data daily
 ### Configuration Guide
 
 **GENERATION_INTERVAL_MS**: Time between batches
+
 - Lower = more frequent updates, more BigQuery load jobs
 - Default: 60000 (1 minute)
 - Range: 10000-300000 (10 seconds to 5 minutes)
 
 **BATCH_SIZE**: Records per batch
+
 - Higher = fewer BigQuery jobs, more records per insert
 - Default: 100
 - Range: 50-1000
 - Free tier limit: ~1,500 load jobs per day
 
 **Records per day** = `(86,400,000 / GENERATION_INTERVAL_MS) × BATCH_SIZE`
+
 - Default: `(86400000 / 60000) × 100 = 144,000 records/day`
 - At 1000 batch size: 1.44M records/day
 
@@ -132,17 +135,21 @@ npx maritime-data-synthesizer help
 ### Typical Workflow
 
 1. **Initialize with historical data**:
+
    ```bash
    npx maritime-data-synthesizer initialize 30
    ```
+
    This creates the BigQuery table and loads 30 days of historical vessel positions.
    - Time: ~30-60 minutes for 30 days
    - Data: ~4.3M records (144K/day × 30 days)
 
 2. **Start continuous generation**:
+
    ```bash
    npx maritime-data-synthesizer start
    ```
+
    This starts generating new vessel positions every minute.
    - Press Ctrl+C to stop
 
@@ -158,25 +165,25 @@ const { MaritimeDataSynthesizer } = require('./src');
 
 // Create synthesizer instance
 const synthesizer = new MaritimeDataSynthesizer({
-  totalVessels: 100000,
-  batchSize: 100,
-  generationIntervalMs: 60000,
-  retentionDays: 30
+	totalVessels: 100000,
+	batchSize: 100,
+	generationIntervalMs: 60000,
+	retentionDays: 30,
 });
 
 // Set up event listeners
 synthesizer.on('batch:inserted', (data) => {
-  console.log(`Inserted ${data.records} records`);
+	console.log(`Inserted ${data.records} records`);
 });
 
 synthesizer.on('batch:error', (data) => {
-  console.error('Error:', data.error);
+	console.error('Error:', data.error);
 });
 
 // Initialize and start
 async function run() {
-  await synthesizer.initialize(30); // 30 days of historical data
-  await synthesizer.start();
+	await synthesizer.initialize(30); // 30 days of historical data
+	await synthesizer.start();
 }
 
 run();
@@ -207,23 +214,27 @@ run();
 ### Data Generation Strategy
 
 **Vessel Pool**:
+
 - Pre-generates 10,000 vessels with persistent identifiers
 - Each vessel has fixed attributes (MMSI, IMO, type, dimensions)
 - Vessels are reused across batches for consistency
 
 **Journey Simulation**:
+
 - Each vessel maintains a journey state (origin → destination)
 - 30% of vessels are in port at any time (anchored or moored)
 - 70% are at sea, moving toward their destination
 - When a vessel reaches its destination, it enters port and eventually starts a new journey
 
 **Movement Calculation**:
+
 - Uses Haversine formula for great circle distances
 - Calculates bearing between current position and destination
 - Moves vessel based on speed and course
 - Accounts for different speeds by vessel type and status
 
 **Geographic Distribution**:
+
 - Major ports weighted by actual traffic volume
 - Asia-Pacific: 50% (Singapore, Shanghai, Hong Kong, etc.)
 - Europe: 20% (Rotterdam, Antwerp, Hamburg, etc.)
@@ -236,6 +247,7 @@ run();
 ### Throughput
 
 With default settings:
+
 - **144,000 records/day** (100 records × 1,440 batches)
 - **1.44M records/day** at 1,000 batch size
 - **4.3M records** for 30 days of historical data
@@ -243,6 +255,7 @@ With default settings:
 ### BigQuery Costs (Free Tier)
 
 The synthesizer is optimized for BigQuery free tier:
+
 - **Storage**: 10 GB free (30 days ≈ 2-3 GB)
 - **Queries**: 1 TB/month free (plenty for monitoring)
 - **Load Jobs**: 1,500/table/day limit (default config uses ~1,440/day)
@@ -327,24 +340,28 @@ LIMIT 100
 ## Use Cases
 
 ### Maritime Analytics
+
 - Track vessel movements and patterns
 - Analyze port activity and congestion
 - Study shipping routes and trade flows
 - Monitor vessel speeds and efficiency
 
 ### Machine Learning
+
 - Train models for vessel trajectory prediction
 - Anomaly detection for unusual vessel behavior
 - Port arrival time estimation
 - Route optimization algorithms
 
 ### Visualization & Dashboards
+
 - Real-time vessel tracking maps
 - Port activity heatmaps
 - Trade flow visualization
 - Fleet management dashboards
 
 ### Testing & Development
+
 - Test maritime tracking applications
 - Develop AIS (Automatic Identification System) tools
 - Validate geospatial queries and analytics
@@ -355,6 +372,7 @@ LIMIT 100
 The synthesizer emits comprehensive events for monitoring:
 
 ### Service Events
+
 - `service:starting` - Service initialization begun
 - `service:started` - Service running
 - `service:stopping` - Shutdown initiated
@@ -362,6 +380,7 @@ The synthesizer emits comprehensive events for monitoring:
 - `service:error` - Fatal error occurred
 
 ### Initialization Events
+
 - `init:starting` - Historical data load beginning
 - `init:bigquery-ready` - Schema created
 - `init:data-generation-starting` - Batch generation starting
@@ -370,6 +389,7 @@ The synthesizer emits comprehensive events for monitoring:
 - `init:error` - Initialization failed
 
 ### Batch Events
+
 - `batch:generating` - Record generation started
 - `batch:generated` - Records ready for insert
 - `batch:inserting` - Insert job submitted to BigQuery
@@ -377,6 +397,7 @@ The synthesizer emits comprehensive events for monitoring:
 - `batch:error` - Insert failed
 
 ### Cleanup Events
+
 - `cleanup:starting` - Retention cleanup started
 - `cleanup:completed` - Old data deleted
 - `cleanup:error` - Cleanup failed
@@ -384,19 +405,23 @@ The synthesizer emits comprehensive events for monitoring:
 ## Troubleshooting
 
 ### "GCP_PROJECT_ID must be set"
+
 - Ensure `.env` file exists with `GCP_PROJECT_ID=your-project-id`
 - Or set environment variable: `export GCP_PROJECT_ID=your-project-id`
 
 ### "Load job completed with errors"
+
 - Check BigQuery quota limits (1,500 load jobs per table per day)
 - Verify table schema matches data format
 - Review BigQuery logs in GCP Console
 
 ### High Memory Usage
+
 - Reduce `TOTAL_VESSELS` (default 100,000)
 - Decrease `BATCH_SIZE` to process smaller batches
 
 ### Slow Historical Data Loading
+
 - Increase `BATCH_SIZE` to insert more records per job
 - Reduce number of days to load
 - Consider loading in stages
@@ -404,17 +429,20 @@ The synthesizer emits comprehensive events for monitoring:
 ## Technical Details
 
 ### Coordinate System
+
 - **Latitude**: -90° (South Pole) to +90° (North Pole)
 - **Longitude**: -180° (Date Line West) to +180° (Date Line East)
 - **Precision**: 6 decimal places (~0.1 meters)
 
 ### Navigation Calculations
+
 - **Distance**: Haversine formula (great circle)
 - **Bearing**: Forward azimuth calculation
 - **New Position**: Given distance and bearing
 - **Speed**: Nautical miles per hour (knots)
 
 ### BigQuery Optimization
+
 - **Partitioning**: By timestamp (DAY)
 - **Clustering**: By vessel_type, mmsi, report_date
 - **Load Jobs**: NDJSON format via temp files

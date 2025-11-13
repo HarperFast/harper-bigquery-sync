@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
 - Rolling window mode for automatic data window maintenance
 - `clear` command to truncate table without deleting schema
 - Automatic backfill on service start
@@ -26,12 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Progress tracking for all operations
 
 ### Changed
+
 - `start` command now auto-backfills by default (rolling window mode)
 - Documentation reorganized into logical sections
 - Test files moved to examples/ directory
 - Improved error messages and user feedback
 
 ### Fixed
+
 - Configuration loading from config.yaml
 - BigQuery credential handling
 - Service account key path resolution
@@ -39,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - 2024-XX-XX
 
 ### Added
+
 - Initial release of BigQuery Plugin for HarperDB
 - Modulo-based partitioning for distributed ingestion
 - Adaptive batch sizing based on sync lag
@@ -51,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable sync phases (initial, catchup, steady)
 
 ### Plugin Features
+
 - Horizontal scalability with linear throughput
 - No coordination overhead between nodes
 - Deterministic partition assignments
@@ -60,6 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Generic storage for any BigQuery schema
 
 ### Documentation
+
 - Comprehensive design document
 - Blog post explaining architecture evolution
 - System overview showing component interaction
@@ -86,6 +92,7 @@ This project follows [Semantic Versioning](https://semver.org/):
 ### Deprecation Policy
 
 Features will be deprecated with:
+
 1. Warning in release notes
 2. Deprecation notice in code
 3. Minimum 2 minor versions before removal

@@ -71,6 +71,7 @@ git commit -m "chore: update dependencies"
 ```
 
 **Commit Types**:
+
 - `feat`: New feature
 - `fix`: Bug fix
 - `docs`: Documentation changes
@@ -86,6 +87,7 @@ git push origin your-branch-name
 ```
 
 Then create a Pull Request on GitHub with:
+
 - Clear title and description
 - Reference any related issues
 - Screenshots/examples if applicable
@@ -101,6 +103,7 @@ Then create a Pull Request on GitHub with:
 - Keep functions focused and small
 
 **Example**:
+
 ```javascript
 /**
  * Generate vessel position data
@@ -190,6 +193,7 @@ The BigQuery plugin integrates with HarperDB. When modifying plugin code:
 4. Check data consistency
 
 **Key Files**:
+
 - `src/sync-engine.js` - Main sync engine logic
 - `src/validation.js` - Data validation
 - `schema/harper-bigquery-sync.graphql` - GraphQL schema
@@ -204,6 +208,7 @@ The maritime data synthesizer generates test data. When modifying:
 4. Check rolling window behavior
 
 **Key Files**:
+
 - `src/generator.js` - Data generation
 - `src/service.js` - Orchestration
 - `src/bigquery.js` - BigQuery client
@@ -233,6 +238,7 @@ By contributing, you agree that your contributions will be licensed under the Ap
 ## Recognition
 
 Contributors will be:
+
 - Listed in package.json contributors
 - Acknowledged in release notes
 - Credited in documentation for major features
