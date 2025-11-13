@@ -1,0 +1,15 @@
+# Prettier ignore patterns
+
+# Node modules
+node_modules/
+
+# Build outputs
+dist/
+build/
+coverage/
+
+# Example files with intentional YAML syntax (multiple config examples in one file)
+examples/column-selection-config.yaml
+
+# External packages
+ext/
