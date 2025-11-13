@@ -33,8 +33,8 @@
 		"README.md"
 	],
 	"scripts": {
-		"test": "node --test test/**/*.test.js",
-		"test:coverage": "node --test --experimental-test-coverage test/**/*.test.js",
+		"test": "node --test 'test/**/*.test.js'",
+		"test:coverage": "node --test --experimental-test-coverage 'test/**/*.test.js'",
 		"test:config": "node examples/test-bigquery-config.js",
 		"lint": "eslint .",
 		"format": "prettier .",
