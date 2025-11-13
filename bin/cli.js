@@ -248,6 +248,16 @@ async function runMultiTableMode(command, arg, config) {
   console.log('Note: Only "initialize" command is currently supported for multi-table mode');
   console.log('For continuous generation, use single-table mode\n');
 
+  // TODO: Add rolling window support for multi-table mode
+  // Currently, multi-table orchestrator only supports one-time 'initialize' command
+  // To add continuous generation with rolling window:
+  // 1. Implement maintainWindow logic in MultiTableOrchestrator
+  // 2. Add backfill capability (check data range per table)
+  // 3. Add continuous generation loop
+  // 4. Add automatic cleanup (per-table retention)
+  // 5. Support 'start', 'stats', 'clear', 'clean', 'reset' commands
+  // See single-table MaritimeDataSynthesizer for reference implementation
+
   switch (command) {
     case 'initialize': {
       const scenario = arg || 'realistic';
