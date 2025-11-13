@@ -42,3 +42,12 @@ type SyncAudit @table {
 	reason: String
 	recordSample: String
 }
+
+# Schema lock table for distributed schema checking
+# Ensures only one node checks schemas at a time
+type SchemaLock @table {
+	lockId: String! @primaryKey # Always "schema_check"
+	nodeId: String! # Which node holds the lock (hostname-pid)
+	acquiredAt: Date! # When lock was acquired
+	expiresAt: Date! @indexed # TTL for automatic release (10 minutes)
+}
