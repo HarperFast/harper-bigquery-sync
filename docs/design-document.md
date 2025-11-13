@@ -1,6 +1,6 @@
 # Scaling BigQuery to Harper Ingestion: Why Simple Solutions Don't Work and What Does
 
-*How we evolved from a single-process bottleneck to a distributed architecture that scales linearly*
+_How we evolved from a single-process bottleneck to a distributed architecture that scales linearly_
 
 **About Harper:** Harper is a distributed application platform that unifies database, cache, and application server into a single system. [Learn more at harperdb.io](https://harperdb.io)
 
@@ -33,6 +33,7 @@ To validate this ingestion system at scale without production data, we developed
 ### Why We Built This
 
 Testing distributed ingestion requires:
+
 - **Realistic data volume**: Millions of records to validate performance
 - **Continuous generation**: Real-time ingestion patterns
 - **Predictable patterns**: Known data for validation
@@ -43,12 +44,14 @@ Testing distributed ingestion requires:
 The synthesizer generates realistic maritime vessel tracking data:
 
 **Scale:**
+
 - 100,000+ vessels with persistent identities (MMSI, IMO numbers)
 - 144,000+ position updates per day (default configuration)
 - Global coverage across 29 major ports
 - Configurable from 1,440 to 1.44M records/day
 
 **Realism:**
+
 - 6 vessel types (container ships, tankers, bulk carriers, cargo, passenger, fishing)
 - Physics-based movement using Haversine distance calculations
 - Port-to-port journeys with realistic speeds (10-25 knots depending on type)
@@ -56,18 +59,19 @@ The synthesizer generates realistic maritime vessel tracking data:
 - Weighted port traffic (Singapore, Rotterdam, Shanghai busier than smaller ports)
 
 **Data Structure** (actual generated record):
+
 ```json
 {
-  "timestamp": "2025-11-07T16:30:00.000Z",
-  "mmsi": "367123456",
-  "imo": "IMO9876543",
-  "vessel_name": "MARITIME VOYAGER",
-  "vessel_type": "Container Ship",
-  "latitude": 37.7749,
-  "longitude": -122.4194,
-  "speed_knots": 12.5,
-  "heading": 275,
-  "status": "Under way using engine"
+	"timestamp": "2025-11-07T16:30:00.000Z",
+	"mmsi": "367123456",
+	"imo": "IMO9876543",
+	"vessel_name": "MARITIME VOYAGER",
+	"vessel_type": "Container Ship",
+	"latitude": 37.7749,
+	"longitude": -122.4194,
+	"speed_knots": 12.5,
+	"heading": 275,
+	"status": "Under way using engine"
 }
 ```
 
@@ -78,16 +82,16 @@ The synthesizer and plugin share configuration via `config.yaml`:
 ```yaml
 bigquery:
   projectId: your-project-id
-  dataset: maritime_tracking      # Same dataset/table by default
+  dataset: maritime_tracking # Same dataset/table by default
   table: vessel_positions
   credentials: service-account-key.json
 
 # Optional: override target for synthesizer
 synthesizer:
   # dataset: test_data            # Uncomment to use different dataset
-  batchSize: 100                   # Positions per batch
-  generationIntervalMs: 60000      # 60 seconds between batches
-  retentionDays: 30                # Auto-cleanup after 30 days
+  batchSize: 100 # Positions per batch
+  generationIntervalMs: 60000 # 60 seconds between batches
+  retentionDays: 30 # Auto-cleanup after 30 days
 ```
 
 **By default**, the synthesizer writes to the same BigQuery table the plugin reads from—perfect for testing end-to-end.
@@ -95,11 +99,13 @@ synthesizer:
 ### Key Features
 
 **Rolling Window Mode:**
+
 - `npx maritime-data-synthesizer start` - Automatically maintains N-day data window
 - Self-healing: Restarts detect gaps and backfill automatically
 - No manual management after initial setup
 
 **Data Management:**
+
 - `initialize N` - Load N days of historical data
 - `clear` - Truncate data (keeps table schema)
 - `reset N` - Delete and reload with N days
@@ -130,12 +136,14 @@ END LOOP
 ```
 
 **What we liked:**
+
 - Dead simple to implement
 - Easy to reason about
 - Single checkpoint to track
 - DNS load balancing distributes writes across Harper nodes
 
 **What broke:**
+
 - **The bottleneck is pulling FROM BigQuery, not writing TO Harper.** DNS round-robin solved the wrong problem
 - One process = one BigQuery API client = one set of rate limits
 - Limited to a single machine's CPU, memory, and network for the pull operation
@@ -172,12 +180,14 @@ END LOOP
 We could implement the lock in a Harper table, Redis, or ZooKeeper.
 
 **What we liked:**
+
 - Multiple nodes meant automatic failover
 - If the active node dies, another picks up
 - Solves the single process bottleneck from v1
 - **Prevents wasted work:** Without the lock, all nodes would pull the same data from BigQuery (wasting query costs) and write duplicates to Harper (wasting IOPS, even though primary keys dedupe)
 
 **What we hated:**
+
 - **Only one node pulling at a time—no actual parallelism**
 - **The "simple" lock is deceptively complex:**
   - Which node gets the lock? (requires consensus)
@@ -261,6 +271,7 @@ async discoverCluster() {
 ```
 
 **Key points:**
+
 - Node ID is `hostname-workerIndex` (e.g., `node1-0`, `node2-0`)
 - Deterministic lexicographic sorting ensures all nodes agree on partition assignments
 - Falls back to single-node mode if `server.nodes` is empty
@@ -301,6 +312,7 @@ async pullPartition({ nodeId, clusterSize, lastTimestamp, batchSize }) {
 ```
 
 **Why `UNIX_MICROS` instead of `FARM_FINGERPRINT`?**
+
 - Deterministic: Same timestamp always maps to same partition
 - Fast: Integer modulo is cheaper than string hashing
 - Chronological distribution: Adjacent timestamps spread across nodes (better for time-series data)
@@ -367,6 +379,7 @@ async updateCheckpoint(records) {
 ```
 
 **Key differences from naive approach:**
+
 - Uses Harper's `transaction()` for atomic batch writes
 - Harper auto-generates primary key `id` - we don't manually create it
 - All BigQuery columns stored at top level (no nested `data` field)
@@ -426,13 +439,14 @@ async updatePhase() {
 ```
 
 **Configuration** (`config.yaml`):
+
 ```yaml
 sync:
-  initialBatchSize: 10000    # Fast catch-up when hours behind
-  catchupBatchSize: 1000     # Moderate pace when minutes behind
-  steadyBatchSize: 500       # Small frequent polls when near real-time
-  catchupThreshold: 3600     # 1 hour (seconds)
-  steadyThreshold: 300       # 5 minutes (seconds)
+  initialBatchSize: 10000 # Fast catch-up when hours behind
+  catchupBatchSize: 1000 # Moderate pace when minutes behind
+  steadyBatchSize: 500 # Small frequent polls when near real-time
+  catchupThreshold: 3600 # 1 hour (seconds)
+  steadyThreshold: 300 # 5 minutes (seconds)
 ```
 
 This means initial sync is fast (large batches), and steady-state is efficient (small, frequent polls).
@@ -469,6 +483,7 @@ flowchart TB
 ```
 
 **Each node independently:**
+
 - Discovers cluster topology
 - Calculates which partition it owns
 - Polls BigQuery for its partition only
@@ -493,6 +508,7 @@ Need more throughput? Add nodes. Each node handles 1/n of the data:
 ### Independent Failure Recovery
 
 If a node crashes:
+
 - Other nodes keep running
 - Crashed node restarts from its last checkpoint
 - No cluster-wide impact
@@ -508,6 +524,7 @@ No variable coordination latency. Each node's performance is deterministic based
 The one downside: **cluster topology must be relatively stable.**
 
 If you add or remove nodes, the modulo changes:
+
 - Old: `hash(ts) % 3`
 - New: `hash(ts) % 4`
 
@@ -529,11 +546,13 @@ The system gets resilience from Harper's built-in durable node identity:
 **Node ID formula:** `${hostname}-${workerIndex}` (e.g., `node-001-0`, `node-001-1`, `node-002-0`)
 
 **Why this works:**
+
 - If `node-001` thread 0 crashes and restarts, it comes back as `node-001-0` again
 - Same node ID = same partition assignment = continues from checkpoint
 - No manual configuration needed - Harper's runtime provides this automatically
 
 This means each ingestion thread has a stable, persistent identity that survives:
+
 - Process crashes
 - Rolling updates
 - Planned maintenance
@@ -553,6 +572,7 @@ Plan capacity quarterly, make changes during maintenance windows.
 **3. Implement Comprehensive Monitoring**
 
 Essential alerts:
+
 - **Drift alert:** `|bigquery_count - harper_count| > 1000` for 5+ minutes
 - **Lag alert:** Behind BigQuery by >30 minutes
 - **Dead node alert:** No checkpoint update in 5 minutes
@@ -567,6 +587,7 @@ Essential alerts:
 **5. Test Recovery Regularly**
 
 Monthly chaos engineering:
+
 - Kill random nodes, verify recovery from checkpoint
 - Force restarts to validate checkpoint integrity
 - Inject data corruption to test drift detection
@@ -576,6 +597,7 @@ Monthly chaos engineering:
 ### Future Enhancement: Automatic Rebalancing
 
 We could implement a rebalancing protocol:
+
 1. Detect topology change
 2. Pause all nodes briefly
 3. Recalculate partitions
@@ -614,6 +636,7 @@ Instead of comparing estimates, validate what matters: is ingestion progressing 
 Three complementary approaches:
 
 **1. Checkpoint Progress Monitoring**
+
 ```javascript
 // Monitor that ingestion is progressing
 const checkpoint = await tables.SyncCheckpoint.get(nodeId);
@@ -622,7 +645,7 @@ const lagSeconds = (Date.now() - new Date(checkpoint.lastTimestamp)) / 1000;
 
 // Alert if stalled for 10+ minutes
 if (timeSinceLastSync > 600000) {
-  alert('Ingestion stalled');
+	alert('Ingestion stalled');
 }
 ```
 
@@ -665,19 +688,23 @@ async smokeTest() {
 ⚠️ **Note**: Full validation is not yet implemented. The validation subsystem exists in `src/validation.js` but is currently commented out in `src/resources.js` and `src/index.js`. This will be completed in v1.0.
 
 Planned validation approach:
+
 ```javascript
 // Verify Harper records exist in BigQuery
 const harperSample = await tables.BigQueryData.search({ limit: 5 });
 
 for (const record of harperSample) {
-  const exists = await bigquery.query(`
+	const exists = await bigquery.query(
+		`
     SELECT 1 FROM \`dataset.table\`
     WHERE timestamp = @ts AND id = @id LIMIT 1
-  `, { ts: record.timestamp, id: record.id });
+  `,
+		{ ts: record.timestamp, id: record.id }
+	);
 
-  if (!exists) {
-    // Phantom record: exists in Harper but not in BigQuery
-  }
+	if (!exists) {
+		// Phantom record: exists in Harper but not in BigQuery
+	}
 }
 ```
 
@@ -703,37 +730,38 @@ for (const record of harperSample) {
 # BigQuery records are stored as-is with metadata fields
 # Harper auto-generates 'id' field if not provided
 type BigQueryData @table {
-  id: ID @primaryKey
-  # All BigQuery fields stored directly at top level
-  # Metadata fields:
-  # _syncedAt: Date @createdTime
+	id: ID @primaryKey
+	# All BigQuery fields stored directly at top level
+	# Metadata fields:
+	# _syncedAt: Date @createdTime
 }
 
 # Per-node checkpoint
 type SyncCheckpoint @table {
-  nodeId: Int! @primaryKey
-  lastTimestamp: Date!
-  recordsIngested: Long!
-  lastSyncTime: Date!
-  phase: String!
-  batchSize: Int!
+	nodeId: Int! @primaryKey
+	lastTimestamp: Date!
+	recordsIngested: Long!
+	lastSyncTime: Date!
+	phase: String!
+	batchSize: Int!
 }
 
 # Audit log for validation/errors
 type SyncAudit @table {
-  id: ID! @primaryKey
-  timestamp: Date! @indexed @createdTime
-  nodeId: Int
-  bigQueryCount: Long
-  harperCount: Long
-  delta: Long
-  status: String!
-  reason: String
-  recordSample: String
+	id: ID! @primaryKey
+	timestamp: Date! @indexed @createdTime
+	nodeId: Int
+	bigQueryCount: Long
+	harperCount: Long
+	delta: Long
+	status: String!
+	reason: String
+	recordSample: String
 }
 ```
 
 **Key differences from naive schema:**
+
 - `BigQueryData` is generic - all BigQuery columns stored at top level (no predefined fields)
 - Checkpoint includes `lastSyncTime`, `phase`, and `batchSize` for monitoring
 - Audit table flexible - supports both validation and error logging
@@ -779,10 +807,11 @@ async runSyncCycle() {
 ```
 
 **Error handling strategy:**
+
 - Errors logged but don't crash the process
 - Failed cycle retries on next scheduled poll (interval-based retry)
 - Checkpoint preserved from last successful batch
-- ⚠️  **TODO**: Add exponential backoff for transient BigQuery errors
+- ⚠️ **TODO**: Add exponential backoff for transient BigQuery errors
 
 ### Missing Data Handling
 
@@ -790,19 +819,20 @@ async runSyncCycle() {
 
 ```javascript
 for (const record of records) {
-  // Validate timestamp exists
-  if (!convertedRecord[timestampColumn]) {
-    logger.warn(`Missing timestamp column '${timestampColumn}', skipping record`);
-    await this.logSkippedRecord(convertedRecord, `missing_${timestampColumn}`);
-    continue;
-  }
+	// Validate timestamp exists
+	if (!convertedRecord[timestampColumn]) {
+		logger.warn(`Missing timestamp column '${timestampColumn}', skipping record`);
+		await this.logSkippedRecord(convertedRecord, `missing_${timestampColumn}`);
+		continue;
+	}
 
-  // Process valid record
-  validRecords.push(mappedRecord);
+	// Process valid record
+	validRecords.push(mappedRecord);
 }
 ```
 
 **Skipped record logging** (`src/sync-engine.js:450-468`):
+
 ```javascript
 async logSkippedRecord(record, reason) {
   const auditEntry = {
@@ -825,6 +855,7 @@ Skipped records are logged to `SyncAudit` table for monitoring and debugging.
 ### Throughput (Projected)
 
 With 3 nodes on modest hardware:
+
 - **Steady-state:** ~15,000 records/second total (5,000 per node)
 - **Catch-up:** ~30,000 records/second (10,000 per node)
 
@@ -837,11 +868,13 @@ With 3 nodes on modest hardware:
 ### IOPS Usage (Estimated)
 
 With 2 indexes per table:
+
 - ~4 IOPS per record
 - 5,000 records/sec per node = ~20,000 IOPS
 - SSD handles this comfortably
 
 ⚠️ **Note**: These are projected performance numbers based on architecture design. Actual performance will vary based on:
+
 - BigQuery query response times
 - Network latency between BigQuery and Harper
 - Record size and structure
@@ -877,12 +910,14 @@ Node stability vs. flexibility is acceptable. Most systems don't need dynamic sc
 ## When to Use This Pattern
 
 **Good fit:**
+
 - Large datasets with continuous updates
 - Need for horizontal scalability
 - Relatively stable cluster topology
 - Source system supports partitioned queries
 
 **Not ideal:**
+
 - Extremely dynamic cluster sizes (Note: Harper doesn't support autoscaling—nodes must be added/removed manually with rebalancing consideration)
 - Need for strong consistency across nodes immediately
 - Source doesn't support efficient partitioned queries

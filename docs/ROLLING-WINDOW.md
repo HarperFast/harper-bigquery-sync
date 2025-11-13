@@ -124,8 +124,8 @@ Rolling window behavior is controlled by `retentionDays` in `config.yaml`:
 
 ```yaml
 synthesizer:
-  retentionDays: 30           # Target window size
-  cleanupIntervalHours: 24    # How often to clean up old data
+  retentionDays: 30 # Target window size
+  cleanupIntervalHours: 24 # How often to clean up old data
 ```
 
 ## Benefits
@@ -135,12 +135,14 @@ synthesizer:
 No need to run `initialize` before `start`. Just start the service and it handles everything.
 
 **Old workflow:**
+
 ```bash
 npx maritime-data-synthesizer initialize 30  # Manual step
 npx maritime-data-synthesizer start          # Then start
 ```
 
 **New workflow:**
+
 ```bash
 npx maritime-data-synthesizer start          # That's it!
 ```
@@ -148,11 +150,13 @@ npx maritime-data-synthesizer start          # That's it!
 ### 2. Graceful Recovery
 
 Service can be stopped and restarted at any time. It will:
+
 - Check current state
 - Backfill if data is missing
 - Resume generating new data
 
 **Example**: Stop service for 5 days, then restart:
+
 ```
 Checking data range (target: 30 days)...
 Found 3,600,000 records covering 25 days
@@ -163,6 +167,7 @@ Starting continuous generation...
 ### 3. Consistent State
 
 Always maintains exactly N days of data:
+
 - New data continuously added at the front
 - Old data automatically removed from the back
 - Window size remains constant
@@ -170,6 +175,7 @@ Always maintains exactly N days of data:
 ### 4. Production-Ready
 
 Perfect for long-running deployments:
+
 - No manual maintenance needed
 - Self-healing on restart
 - Predictable resource usage
@@ -236,6 +242,7 @@ FROM `project.dataset.table`
 ```
 
 Calculates:
+
 - `daysCovered = (newest - oldest) / 86400000`
 - `daysNeeded = targetDays - daysCovered`
 
@@ -255,19 +262,19 @@ The service emits events for monitoring:
 ```javascript
 // Backfill events
 synthesizer.on('backfill:starting', (data) => {
-  // { days, beforeTimestamp }
+	// { days, beforeTimestamp }
 });
 
 synthesizer.on('backfill:progress', (data) => {
-  // { batchNum, totalBatches, recordsInserted, totalRecords, progress }
+	// { batchNum, totalBatches, recordsInserted, totalRecords, progress }
 });
 
 synthesizer.on('backfill:completed', (data) => {
-  // { recordsInserted, totalTime }
+	// { recordsInserted, totalTime }
 });
 
 synthesizer.on('backfill:error', (data) => {
-  // { error }
+	// { error }
 });
 ```
 
@@ -310,22 +317,24 @@ Still supported if you prefer explicit control.
 
 Backfill time scales linearly with days:
 
-| Days to Backfill | Records | Estimated Time |
-|------------------|---------|----------------|
-| 1 day | 144,000 | ~2 minutes |
-| 7 days | 1,008,000 | ~14 minutes |
-| 23 days | 3,312,000 | ~46 minutes |
-| 30 days | 4,320,000 | ~60 minutes |
+| Days to Backfill | Records   | Estimated Time |
+| ---------------- | --------- | -------------- |
+| 1 day            | 144,000   | ~2 minutes     |
+| 7 days           | 1,008,000 | ~14 minutes    |
+| 23 days          | 3,312,000 | ~46 minutes    |
+| 30 days          | 4,320,000 | ~60 minutes    |
 
 ### Resource Usage
 
 During backfill:
+
 - **Network**: Moderate (1-2 KB per record)
 - **CPU**: Low (<5%)
 - **Memory**: ~150 MB baseline
 - **BigQuery**: 1 load job per batch (1 per second)
 
 During steady state:
+
 - **Network**: Minimal (100 records/min)
 - **CPU**: <1%
 - **Memory**: ~150 MB
@@ -344,6 +353,7 @@ During steady state:
 ### Q: What if I don't want backfill?
 
 **A**: Use `--no-backfill` flag:
+
 ```bash
 npx maritime-data-synthesizer start --no-backfill
 ```
@@ -365,6 +375,7 @@ npx maritime-data-synthesizer start --no-backfill
 If you're currently using manual initialization:
 
 **Old workflow:**
+
 ```bash
 # Step 1: Initialize once
 npx maritime-data-synthesizer initialize 30
@@ -376,6 +387,7 @@ npx maritime-data-synthesizer start
 ```
 
 **New workflow:**
+
 ```bash
 # Just start - everything automatic
 npx maritime-data-synthesizer start

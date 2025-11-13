@@ -29,6 +29,7 @@ END
 **Why it failed:** The bottleneck was pulling FROM BigQuery, not writing TO Harper.
 
 **Key issues:**
+
 - One process = one API client = hard rate limits
 - No parallelism in BigQuery queries
 - Single point of failure
@@ -59,6 +60,7 @@ END
 **Why it failed:** Still no parallelism. Worse—operational complexity exploded.
 
 **The hidden costs of "simple" locks:**
+
 - Which node gets the lock? (consensus problem)
 - Crashed holder vs. slow holder? (timeout tuning nightmare)
 - Network partition = split-brain scenarios
@@ -81,7 +83,7 @@ END
 Hash each record's timestamp, modulo by cluster size:
 
 ```javascript
-nodeId = hash(record.timestamp) % clusterSize
+nodeId = hash(record.timestamp) % clusterSize;
 ```
 
 **In practice:** Node 0 in a 3-node cluster pulls only `hash(timestamp) % 3 == 0` records.
@@ -106,7 +108,7 @@ Harper's native clustering API ([docs](https://docs.harperdb.io/docs/developers/
 ```javascript
 const nodes = await harperCluster.getNodes();
 const sorted = nodes.sort((a, b) => a.id.localeCompare(b.id));
-const myNodeId = sorted.findIndex(n => n.id === harperCluster.currentNode.id);
+const myNodeId = sorted.findIndex((n) => n.id === harperCluster.currentNode.id);
 ```
 
 Deterministic sorting = consistent partition assignments across all nodes.
@@ -131,9 +133,9 @@ const query = `
 ```javascript
 await harperTable.putBatch(records);
 await checkpointTable.put({
-  nodeId: myNodeId,
-  lastTimestamp: records[records.length - 1].timestamp,
-  recordsIngested: totalIngested
+	nodeId: myNodeId,
+	lastTimestamp: records[records.length - 1].timestamp,
+	recordsIngested: totalIngested,
 });
 ```
 
@@ -147,9 +149,9 @@ Batch size adjusts to lag:
 
 ```javascript
 function calculateBatchSize(lag) {
-  if (lag > 3600) return 10000;  // Hours behind
-  if (lag > 300) return 1000;     // Minutes behind
-  return 500;                     // Near real-time
+	if (lag > 3600) return 10000; // Hours behind
+	if (lag > 300) return 1000; // Minutes behind
+	return 500; // Near real-time
 }
 ```
 
@@ -178,6 +180,7 @@ graph TB
 ```
 
 **Each node independently:**
+
 - Discovers cluster topology
 - Calculates its partition
 - Polls BigQuery for its partition only
@@ -189,21 +192,25 @@ graph TB
 ## Why This Works
 
 **No coordination overhead**
+
 - Zero inter-node communication for ingestion
 - No locks, leader election, or consensus
 - Just independent, parallel work
 
 **Linear scalability**
+
 - 3 nodes = 3x throughput
 - 6 nodes = 6x throughput
 - Each handles 1/n of data
 
 **Independent failure recovery**
+
 - Node crashes? Others keep running
 - Crashed node restarts from last checkpoint
 - Zero cluster-wide impact
 
 **Predictable performance**
+
 - No variable coordination latency
 - Performance = f(partition size, BigQuery response time)
 
@@ -221,7 +228,7 @@ graph TB
 
 ```yaml
 clustering:
-  nodeId: node-001  # Never changes
+  nodeId: node-001 # Never changes
   peers: [node-001, node-002, node-003]
 ```
 
@@ -265,6 +272,7 @@ Quarterly capacity planning replaces frequent topology changes.
 **Initial approach (V1):** Compare BigQuery counts with Harper counts every 5 minutes.
 
 **Why it failed:**
+
 - **Eventual consistency:** Harper is eventually consistent—counts don't reflect cluster state immediately
 - **Estimate variance:** `count()` returns performance-optimized estimates with large, inconsistent ranges
 - **False positives:** Alerts fired during normal operation, not actual data loss
@@ -282,6 +290,7 @@ Quarterly capacity planning replaces frequent topology changes.
 **3. Spot checks** — Randomly verify 5-10 records exist in both BigQuery and Harper
 
 **Key metrics:**
+
 - **Lag:** Seconds behind BigQuery
 - **Throughput:** Records/sec per node
 - **Phase:** Initial | Catchup | Steady
@@ -297,28 +306,28 @@ Quarterly capacity planning replaces frequent topology changes.
 
 ```graphql
 type BigQueryData @table {
-  id: ID! @primaryKey
-  timestamp: String! @indexed
-  deviceId: String @indexed
-  data: Any
-  _syncedAt: String @createdTime
+	id: ID! @primaryKey
+	timestamp: String! @indexed
+	deviceId: String @indexed
+	data: Any
+	_syncedAt: String @createdTime
 }
 
 type SyncCheckpoint @table {
-  nodeId: Int! @primaryKey
-  lastTimestamp: String!
-  recordsIngested: Long!
-  phase: String!  # initial | catchup | steady
+	nodeId: Int! @primaryKey
+	lastTimestamp: String!
+	recordsIngested: Long!
+	phase: String! # initial | catchup | steady
 }
 
 type SyncAudit @table {
-  id: ID! @primaryKey
-  timestamp: String! @indexed
-  nodeId: Int!
-  bigQueryCount: Long!
-  harperCount: Long!
-  delta: Long!
-  status: String!
+	id: ID! @primaryKey
+	timestamp: String! @indexed
+	nodeId: Int!
+	bigQueryCount: Long!
+	harperCount: Long!
+	delta: Long!
+	status: String!
 }
 ```
 
@@ -326,17 +335,17 @@ type SyncAudit @table {
 
 ```javascript
 async function ingestBatch(records) {
-  try {
-    await harperTable.putBatch(records);
-    await updateCheckpoint(records[records.length - 1].timestamp);
-  } catch (error) {
-    if (isRetriable(error)) {
-      await sleep(exponentialBackoff());
-      return ingestBatch(records);
-    }
-    logger.error('Unrecoverable', { error, records });
-    // Skip, continue
-  }
+	try {
+		await harperTable.putBatch(records);
+		await updateCheckpoint(records[records.length - 1].timestamp);
+	} catch (error) {
+		if (isRetriable(error)) {
+			await sleep(exponentialBackoff());
+			return ingestBatch(records);
+		}
+		logger.error('Unrecoverable', { error, records });
+		// Skip, continue
+	}
 }
 ```
 
@@ -344,11 +353,11 @@ async function ingestBatch(records) {
 
 ```javascript
 for (const record of records) {
-  if (!record.timestamp) {
-    await audit.logSkipped(record, 'missing_timestamp');
-    continue;
-  }
-  // Process
+	if (!record.timestamp) {
+		await audit.logSkipped(record, 'missing_timestamp');
+		continue;
+	}
+	// Process
 }
 ```
 
@@ -357,15 +366,18 @@ for (const record of records) {
 ## Performance Results
 
 **Throughput** (3 nodes, modest hardware):
+
 - Steady: 15K records/sec total (5K per node)
 - Catchup: 30K records/sec (10K per node)
 
 **Latency:**
+
 - Steady-state lag: <30 sec
 - Initial sync: 6 hours for 100M records
 - Catchup from 1hr lag: 10 min
 
 **IOPS** (2 indexes):
+
 - 4 IOPS per record
 - 5K records/sec/node = 20K IOPS
 - SSD handles comfortably
@@ -389,12 +401,14 @@ for (const record of records) {
 ## When to Use This Pattern
 
 **✅ Good fit:**
+
 - Large, continuously updating datasets
 - Horizontal scalability requirements
 - Stable cluster topology
 - Source supports partitioned queries
 
 **❌ Poor fit:**
+
 - Minute-by-minute autoscaling needs
 - Immediate strong consistency requirements
 - Source lacks efficient partition support
@@ -418,18 +432,21 @@ This pattern applies beyond BigQuery and Harper—anywhere you need large-scale 
 To validate this architecture with realistic workloads, we built the **Maritime Vessel Data Synthesizer**:
 
 **What it does:**
+
 - Generates 100,000+ vessel positions with realistic movement patterns
 - Simulates global maritime traffic across 29 major ports
 - Produces 144,000+ records/day to BigQuery
 - Uses the same `config.yaml` configuration as the plugin
 
 **Why it matters:**
+
 - Test the full ingestion pipeline without production data
 - Validate partition distribution across nodes
 - Load test with millions of records
 - Privacy-compliant development and testing
 
 **Quick start:**
+
 ```bash
 npx maritime-data-synthesizer initialize 30  # Load 30 days
 npx maritime-data-synthesizer start          # Continuous generation
@@ -446,6 +463,7 @@ See [docs/QUICKSTART.md](docs/QUICKSTART.md) for the 5-minute setup guide or [MA
 **Need help?** The team at Harper is ready to discuss data ingestion challenges.
 
 **Resources:**
+
 - [Design Document](#) — Full technical details
 - [GitHub Repository](#) — Complete implementation
 - [HarperDB Docs](https://docs.harperdb.io) — Platform documentation

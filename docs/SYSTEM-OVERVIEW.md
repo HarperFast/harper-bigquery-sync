@@ -7,6 +7,7 @@ This project contains two complementary components that work together:
 **Purpose**: Syncs data FROM BigQuery INTO HarperDB
 
 **What it does**:
+
 - Connects to BigQuery and monitors a source table
 - Fetches new/updated records based on timestamp
 - Ingests data into HarperDB with validation
@@ -14,10 +15,11 @@ This project contains two complementary components that work together:
 - Provides GraphQL API for querying synced data
 
 **Configuration** (in `config.yaml`):
+
 ```yaml
 bigquery:
   projectId: your-gcp-project-id
-  dataset: maritime_tracking      # Reads from here
+  dataset: maritime_tracking # Reads from here
   table: vessel_positions
   timestampColumn: timestamp
   credentials: service-account-key.json
@@ -29,6 +31,7 @@ bigquery:
 **Purpose**: Generates synthetic data and writes it TO BigQuery
 
 **What it does**:
+
 - Creates realistic vessel tracking data at global scale
 - Generates 100,000+ vessel positions with movement patterns
 - Writes to BigQuery with proper schema and partitioning
@@ -36,9 +39,10 @@ bigquery:
 - Can be used to test the plugin or for other purposes
 
 **Configuration** (in `config.yaml`):
+
 ```yaml
 synthesizer:
-  dataset: maritime_tracking      # Writes to here
+  dataset: maritime_tracking # Writes to here
   table: vessel_positions
   totalVessels: 100000
   batchSize: 100
@@ -52,6 +56,7 @@ synthesizer:
 ### Shared Configuration
 
 Both components use the **same** BigQuery connection:
+
 - Same GCP project
 - Same credentials (`service-account-key.json`)
 - Same location (e.g., `US`)
@@ -121,9 +126,9 @@ Update `config.yaml`:
 ```yaml
 bigquery:
   projectId: irjudson-demo
-  dataset: maritime_tracking      # Point to synthetic data
+  dataset: maritime_tracking # Point to synthetic data
   table: vessel_positions
-  timestampColumn: timestamp      # Use 'timestamp' field
+  timestampColumn: timestamp # Use 'timestamp' field
   credentials: service-account-key.json
   location: US
 ```
@@ -131,6 +136,7 @@ bigquery:
 ### 3. Run Plugin
 
 Start HarperDB with the plugin, and it will:
+
 - Sync vessel positions from BigQuery
 - Make them queryable via GraphQL
 - Keep data up-to-date as synthesizer generates new records
@@ -140,6 +146,7 @@ Start HarperDB with the plugin, and it will:
 For production, keep them separate:
 
 ### Plugin Configuration (production data)
+
 ```yaml
 bigquery:
   dataset: production_data
@@ -148,6 +155,7 @@ bigquery:
 ```
 
 ### Synthesizer Configuration (test data)
+
 ```yaml
 synthesizer:
   dataset: test_data
@@ -159,21 +167,25 @@ Both use the same credentials, but read/write different datasets.
 ## Key Benefits
 
 ### Unified Configuration
+
 - Single `config.yaml` for both components
 - Shared BigQuery connection settings
 - No duplicate credential management
 
 ### Flexible Usage
+
 - Use synthesizer independently for data generation
 - Use plugin independently for any BigQuery table
 - Combine them for end-to-end testing
 
 ### Realistic Test Data
+
 - Synthesizer creates production-like workloads
 - Millions of records with realistic patterns
 - Perfect for load testing and validation
 
 ### Cost Optimization
+
 - Both use BigQuery free tier efficiently
 - Load jobs instead of streaming inserts
 - Automatic cleanup of old data
@@ -181,17 +193,19 @@ Both use the same credentials, but read/write different datasets.
 ## Configuration Reference
 
 ### Required (shared by both)
+
 ```yaml
 bigquery:
-  projectId: your-project-id      # GCP project
-  credentials: key.json            # Service account key
-  location: US                     # BigQuery region
+  projectId: your-project-id # GCP project
+  credentials: key.json # Service account key
+  location: US # BigQuery region
 ```
 
 ### Plugin-specific
+
 ```yaml
 bigquery:
-  dataset: source_dataset          # Where to read from
+  dataset: source_dataset # Where to read from
   table: source_table
   timestampColumn: timestamp_field
 
@@ -203,9 +217,10 @@ sync:
 ```
 
 ### Synthesizer-specific
+
 ```yaml
 synthesizer:
-  dataset: target_dataset          # Where to write to
+  dataset: target_dataset # Where to write to
   table: target_table
   totalVessels: 100000
   batchSize: 100
@@ -246,6 +261,7 @@ harper-bigquery-sync/
 ## Quick Commands
 
 ### Synthesizer
+
 ```bash
 # Generate test data
 npx maritime-data-synthesizer initialize 30
@@ -257,6 +273,7 @@ npx maritime-data-synthesizer reset 30
 ```
 
 ### Plugin
+
 ```bash
 # Runs as HarperDB plugin
 # See HarperDB documentation for setup

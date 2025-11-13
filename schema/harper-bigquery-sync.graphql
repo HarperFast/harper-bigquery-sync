@@ -5,31 +5,31 @@
 # BigQuery records are stored as-is with metadata fields
 # Harper will auto-generate 'id' field if not provided
 type BigQueryData @table {
-  id: ID @primaryKey
-  # All BigQuery fields stored directly at top level
-  # Metadata fields:
-  # _syncedAt: Date @createdTime
+	id: ID @primaryKey
+	# All BigQuery fields stored directly at top level
+	# Metadata fields:
+	# _syncedAt: Date @createdTime
 }
 
 # Checkpoint table for ingestion
 type SyncCheckpoint @table {
-  nodeId: Int! @primaryKey
-  lastTimestamp: Date!
-  recordsIngested: Long!
-  lastSyncTime: Date!
-  phase: String!
-  batchSize: Int!
+	nodeId: Int! @primaryKey
+	lastTimestamp: Date!
+	recordsIngested: Long!
+	lastSyncTime: Date!
+	phase: String!
+	batchSize: Int!
 }
 
 # Audit table for ingestion
 type SyncAudit @table {
-  id: ID! @primaryKey
-  timestamp: Date! @indexed @createdTime
-  nodeId: Int
-  bigQueryCount: Long
-  harperCount: Long
-  delta: Long
-  status: String!
-  reason: String
-  recordSample: String
+	id: ID! @primaryKey
+	timestamp: Date! @indexed @createdTime
+	nodeId: Int
+	bigQueryCount: Long
+	harperCount: Long
+	delta: Long
+	status: String!
+	reason: String
+	recordSample: String
 }
