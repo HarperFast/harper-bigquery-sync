@@ -28,17 +28,31 @@ Tests for core sync engine logic:
 - Poll interval calculation
 - Timestamp validation
 
-### ⏸️ Generator Tests (`generator.test.js.skip`)
+### ✅ Generator Tests (`generator.test.js`)
 
-**Currently skipped** due to memory leak in journey tracking.
+Tests for maritime vessel data generator:
 
-The maritime vessel generator works correctly in production but has a memory issue when repeatedly instantiating generators in tests. The `journeys` Map grows unbounded during test execution.
+- Initialization and configuration
+- Vessel pool creation
+- Batch generation with realistic data
+- Journey tracking with memory leak prevention
+- Automatic cleanup of old journeys
 
-**TODO:** Investigate and fix memory leak in `src/generator.js` journey tracking system before re-enabling these tests.
+**Memory leak fixed:** Implemented journey cleanup mechanism that limits active journeys and removes old/completed journeys automatically.
+
+### ✅ BigQuery Client Tests (`bigquery-client.test.js`)
+
+Tests for BigQuery API client:
+
+- Timestamp normalization (ISO 8601 format)
+- Checkpoint handling (Date object support)
+- Corrupt checkpoint detection
+- Exponential backoff retry logic with jitter
+- Transient vs permanent error detection
 
 ## Test Coverage
 
-Current coverage: **19/19 tests passing** (core functionality)
+Current coverage: **70/70 tests passing** (core functionality)
 
 Areas tested:
 
@@ -47,10 +61,11 @@ Areas tested:
 - Data partitioning ✅
 - Phase transitions ✅
 - Record validation ✅
+- Generator with journey tracking ✅
+- BigQuery client with retry logic ✅
 
 Areas not tested:
 
-- Generator (memory leak) ⏸️
 - BigQuery integration (requires live instance) ⏭️
 - Harper integration (requires live instance) ⏭️
 

@@ -19,7 +19,7 @@ Consolidated task list for Harper BigQuery Sync plugin and Maritime Data Synthes
 
 ### Code Quality
 
-- [ ] **Fix memory leak in journey tracking** [#5](https://github.com/HarperFast/harper-bigquery-sync/issues/5)
+- [x] **Fix memory leak in journey tracking** [#5](https://github.com/HarperFast/harper-bigquery-sync/issues/5)
   - Memory leak in `src/generator.js` journey tracking system
   - Blocks re-enabling certain tests
   - Related to vessel position generation
