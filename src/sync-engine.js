@@ -2,10 +2,9 @@
 // File: sync-engine.js
 // Core synchronization engine with modulo-based partitioning
 
-/* global config, harperCluster, tables */
+/* global tables */
 
 import { BigQueryClient } from './bigquery-client.js';
-import { globals } from './globals.js';
 
 export class SyncEngine {
 	constructor(config) {
@@ -372,7 +371,7 @@ export class SyncEngine {
 			}
 
 			let lastResult;
-			transaction((txn) => {
+			transaction((_txn) => {
 				logger.info(
 					`[SyncEngine.ingestRecords] Cleaned Records[0]: ${JSON.stringify(validRecords[0]).substring(0, 500)}`
 				);

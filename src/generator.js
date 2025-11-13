@@ -92,7 +92,7 @@ const VESSEL_TYPES = [
 ];
 
 // Vessel status options
-const VESSEL_STATUS = ['UNDERWAY_USING_ENGINE', 'AT_ANCHOR', 'MOORED', 'UNDERWAY_SAILING', 'NOT_UNDER_COMMAND'];
+const _VESSEL_STATUS = ['UNDERWAY_USING_ENGINE', 'AT_ANCHOR', 'MOORED', 'UNDERWAY_SAILING', 'NOT_UNDER_COMMAND'];
 
 // Flag states (top maritime nations)
 const FLAG_STATES = [

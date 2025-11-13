@@ -2,8 +2,6 @@
 // File: bigquery-client.js
 // BigQuery API client with partition-aware queries
 
-/* global config */
-
 import { BigQuery } from '@google-cloud/bigquery';
 
 export class BigQueryClient {
@@ -98,7 +96,7 @@ export class BigQueryClient {
 	}
 
 	async normalizeToIso(ts) {
-		if (ts == null) return null;
+		if (ts === null || ts === undefined) return null;
 
 		if (ts instanceof Date) return ts.toISOString();
 
