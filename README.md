@@ -66,7 +66,7 @@ npx maritime-data-synthesizer initialize realistic
 - `clear` - Clear all data (keeps schema)
 - `reset N` - Delete and reload with N days of data
 
-**Note:** Multi-table mode (current default config) supports `initialize` command. For continuous generation with `start`, use single-table config format.
+**Note:** Both single-table and multi-table modes now support all commands including `start` for continuous generation with rolling windows.
 
 **Documentation:**
 

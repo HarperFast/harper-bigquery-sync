@@ -251,19 +251,7 @@ async function runSingleTableMode(command, arg, config) {
 }
 
 async function runMultiTableMode(command, arg, config) {
-	console.log('\nMulti-table orchestrator mode - generating all configured tables');
-	console.log('Note: Only "initialize" command is currently supported for multi-table mode');
-	console.log('For continuous generation, use single-table mode\n');
-
-	// TODO: Add rolling window support for multi-table mode
-	// Currently, multi-table orchestrator only supports one-time 'initialize' command
-	// To add continuous generation with rolling window:
-	// 1. Implement maintainWindow logic in MultiTableOrchestrator
-	// 2. Add backfill capability (check data range per table)
-	// 3. Add continuous generation loop
-	// 4. Add automatic cleanup (per-table retention)
-	// 5. Support 'start', 'stats', 'clear', 'clean', 'reset' commands
-	// See single-table MaritimeDataSynthesizer for reference implementation
+	console.log('\nMulti-table orchestrator mode - generating all configured tables\n');
 
 	switch (command) {
 		case 'initialize': {
@@ -304,15 +292,71 @@ async function runMultiTableMode(command, arg, config) {
 			break;
 		}
 
-		case 'start':
+		case 'start': {
+			// Check for optional flags
+			const maintainWindow = !process.argv.includes('--no-backfill');
+			const targetDays = config.retentionDays;
+
+			console.log('Starting Multi-Table Maritime Data Generator...\n');
+
+			if (maintainWindow) {
+				console.log(`Rolling window mode: Will maintain ${targetDays}-day data window for all tables`);
+				console.log('  - Automatically backfills if data is missing');
+				console.log('  - Continuously generates new data');
+				console.log('  - Automatically cleans up old data\n');
+			} else {
+				console.log('Generation-only mode: Will only generate new data (no backfill)\n');
+			}
+
+			const orchestrator = new MultiTableOrchestrator({
+				bigquery: {
+					projectId: config.projectId,
+					keyFilename: config.credentials,
+					location: config.location,
+				},
+				scenario: 'realistic',
+				dataset: config.datasetId,
+				batchSize: config.batchSize || 100,
+				generationIntervalMs: config.generationIntervalMs || 60000,
+				retentionDays: config.retentionDays || 30,
+				cleanupIntervalHours: config.cleanupIntervalHours || 24,
+			});
+
+			// Handle shutdown gracefully
+			process.on('SIGINT', () => {
+				console.log('\nShutting down...');
+				orchestrator.stop();
+				console.log('Service stopped');
+				process.exit(0);
+			});
+
+			process.on('SIGTERM', () => {
+				console.log('\nShutting down...');
+				orchestrator.stop();
+				console.log('Service stopped');
+				process.exit(0);
+			});
+
+			await orchestrator.start({
+				dataset: config.datasetId,
+				maintainWindow,
+				targetDays,
+			});
+
+			// Keep the process running
+			console.log('\nPress Ctrl+C to stop\n');
+			break;
+		}
+
 		case 'stats':
 		case 'clear':
 		case 'clean':
 		case 'reset':
-			console.error(`\nCommand "${command}" is not yet supported in multi-table mode.`);
+			console.error(`\nCommand "${command}" is not yet implemented in multi-table mode.`);
 			console.error('Available commands for multi-table mode:');
 			console.error('  initialize <scenario>  - Generate test data (scenarios: small, realistic, stress)');
-			console.error('\nFor continuous generation, switch to single-table mode in config.yaml');
+			console.error('  start                  - Start continuous generation with rolling window');
+			console.error('\nOther commands (stats, clear, clean, reset) are coming soon!');
 			process.exit(1);
 			break;
 
@@ -321,8 +365,11 @@ async function runMultiTableMode(command, arg, config) {
 			process.exit(1);
 	}
 
-	// Note: process.exit(0) is handled in initialize case above with setTimeout
-	// to allow BigQuery client to finish cleanup
+	// Exit for non-start commands
+	if (command !== 'start') {
+		// Note: process.exit(0) is handled in initialize case above with setTimeout
+		// to allow BigQuery client to finish cleanup
+	}
 }
 
 main();

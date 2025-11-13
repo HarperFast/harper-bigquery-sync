@@ -28,7 +28,7 @@ Consolidated task list for Harper BigQuery Sync plugin and Maritime Data Synthes
 
 ### Feature Enhancements
 
-- [ ] **Multi-table rolling window support** [#6](https://github.com/HarperFast/harper-bigquery-sync/issues/6)
+- [x] **Multi-table rolling window support** [#6](https://github.com/HarperFast/harper-bigquery-sync/issues/6)
   - Currently multi-table orchestrator only supports `initialize` command
   - Add `start` command for continuous generation with rolling window
   - Add `backfill` capability
