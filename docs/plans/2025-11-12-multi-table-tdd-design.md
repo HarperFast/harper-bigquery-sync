@@ -800,7 +800,7 @@ src/generators/
 **Actual Implementation:**
 
 ```
-ext/maritime-data-synthesizer/generators/
+tools/maritime-data-synthesizer/generators/
   vessel-positions-generator.js   (NEW - wrapper around main generator)
   port-events-generator.js        (ALREADY EXISTED)
   vessel-metadata-generator.js    (ALREADY EXISTED)

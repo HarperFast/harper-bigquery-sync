@@ -209,10 +209,11 @@ The maritime data synthesizer generates test data. When modifying:
 
 **Key Files**:
 
-- `src/generator.js` - Data generation
-- `src/service.js` - Orchestration
-- `src/bigquery.js` - BigQuery client
-- `bin/cli.js` - CLI interface
+- `src/generator.js` - Data generation (single-table)
+- `src/maritime-synthesizer.js` - Maritime synthesizer wrapper
+- `tools/maritime-data-synthesizer/cli.js` - CLI interface
+- `tools/maritime-data-synthesizer/multi-table-orchestrator.js` - Multi-table orchestration
+- `tools/maritime-data-synthesizer/generators/` - Multi-table data generators
 
 ## Release Process
 
