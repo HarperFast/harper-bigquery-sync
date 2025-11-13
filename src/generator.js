@@ -124,6 +124,8 @@ class MaritimeVesselGenerator {
 		this.vesselsPerBatch = config.vesselsPerBatch || 100;
 		this.vesselPool = [];
 		this.journeys = new Map(); // Track ongoing journeys
+		this.maxJourneys = config.maxJourneys || 10000; // Limit journey tracking to prevent memory leak
+		this.batchCount = 0; // Track batches for periodic cleanup
 
 		// Initialize vessel pool
 		this.initializeVesselPool();
@@ -257,6 +259,49 @@ class MaritimeVesselGenerator {
 	}
 
 	/**
+	 * Clean up old or completed journeys to prevent memory leak
+	 * Removes journeys that have been completed or are too old
+	 */
+	cleanupOldJourneys() {
+		const now = Date.now();
+		const maxAge = 7 * 24 * 3600000; // 7 days in milliseconds
+		let removed = 0;
+
+		// If we have too many journeys, remove oldest completed ones first
+		if (this.journeys.size > this.maxJourneys) {
+			const journeysArray = Array.from(this.journeys.entries());
+			// Sort by completion status and age
+			journeysArray.sort((a, b) => {
+				// Completed journeys first
+				if (a[1].completed && !b[1].completed) return -1;
+				if (!a[1].completed && b[1].completed) return 1;
+				// Then by age
+				return a[1].startTime - b[1].startTime;
+			});
+
+			// Remove oldest half of completed journeys, or oldest 20% if all active
+			const toRemove = Math.floor(this.journeys.size * 0.2);
+			for (let i = 0; i < toRemove && i < journeysArray.length; i++) {
+				this.journeys.delete(journeysArray[i][0]);
+				removed++;
+			}
+		}
+
+		// Also remove any journeys older than maxAge
+		for (const [journeyId, journey] of this.journeys.entries()) {
+			const age = now - journey.startTime.getTime();
+			if (age > maxAge) {
+				this.journeys.delete(journeyId);
+				removed++;
+			}
+		}
+
+		if (removed > 0) {
+			console.log(`Cleaned up ${removed} old journeys (${this.journeys.size} remaining)`);
+		}
+	}
+
+	/**
 	 * Calculate distance between two points (Haversine formula)
 	 */
 	calculateDistance(lat1, lon1, lat2, lon2) {
@@ -363,9 +408,21 @@ class MaritimeVesselGenerator {
 			journey.currentLat += (Math.random() - 0.5) * 0.01;
 			journey.currentLon += (Math.random() - 0.5) * 0.01;
 
-			// 20% chance to leave port
+			// Check if vessel has been in port long enough (12+ hours) to complete journey
+			if (journey.arrivalTime) {
+				const timeInPort = timestamp - journey.arrivalTime;
+				const minPortTime = 12 * 3600000; // 12 hours in milliseconds
+
+				if (timeInPort >= minPortTime) {
+					journey.completed = true;
+				}
+			}
+
+			// 20% chance to leave port and start new journey
 			if (Math.random() < 0.2) {
 				journey.inPort = false;
+				// If leaving, mark current journey as complete
+				journey.completed = true;
 			}
 		} else {
 			// Vessel at sea, moving toward destination
@@ -392,6 +449,7 @@ class MaritimeVesselGenerator {
 				journey.currentLat = journey.destination.lat + (Math.random() - 0.5) * 0.05;
 				journey.currentLon = journey.destination.lon + (Math.random() - 0.5) * 0.05;
 				journey.inPort = true;
+				journey.arrivalTime = timestamp; // Track when vessel arrived
 				speed = 0.5;
 				status = 'AT_ANCHOR';
 			} else {
@@ -419,6 +477,13 @@ class MaritimeVesselGenerator {
 	generateBatch(count = this.vesselsPerBatch, timestampOffset = 0) {
 		const records = [];
 		const now = new Date(Date.now() - timestampOffset);
+
+		// Periodic cleanup to prevent memory leak
+		// Run cleanup every 100 batches or when journey count exceeds threshold
+		this.batchCount++;
+		if (this.batchCount % 100 === 0 || this.journeys.size > this.maxJourneys * 0.8) {
+			this.cleanupOldJourneys();
+		}
 
 		for (let i = 0; i < count; i++) {
 			const vessel = this.vesselPool[Math.floor(Math.random() * this.vesselPool.length)];

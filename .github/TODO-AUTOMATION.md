@@ -9,6 +9,7 @@ This repository uses git hooks to automatically sync between `TODO.md` and GitHu
 Use these keywords in your commit messages to automatically manage issues:
 
 **Close an issue:**
+
 ```bash
 git commit -m "Fixes #3: Add exponential backoff"
 git commit -m "Closes #5: Fixed memory leak"
@@ -16,6 +17,7 @@ git commit -m "Resolves #7: Implemented dynamic table creation"
 ```
 
 **Reference an issue (adds a comment):**
+
 ```bash
 git commit -m "Updates #6: Added initial rolling window support"
 git commit -m "Refs #8: Investigating streaming insert API"
@@ -43,6 +45,7 @@ You can also manually update `TODO.md`:
 ```
 
 Then commit:
+
 ```bash
 git add TODO.md
 git commit -m "Update TODO: mark tasks complete"
@@ -82,6 +85,7 @@ Added configurable retry strategy with exponential backoff and jitter.
 ```
 
 **Result:**
+
 - ✅ TODO.md updated: `- [x] **Add exponential backoff...** [#3]`
 - 💬 Issue #3 gets a comment with commit details
 - 🏷️ Issue #3 ready to be closed manually (or via PR)
@@ -98,6 +102,7 @@ Still TODO:
 ```
 
 **Result:**
+
 - 💬 Issue #6 gets a progress update comment
 - 📋 TODO.md stays as `[ ]` (not completed yet)
 
@@ -111,6 +116,7 @@ See issue discussions for details."
 ```
 
 **Result:**
+
 - 💬 Both issues get update comments
 - 📋 Both stay incomplete in TODO.md
 
@@ -136,18 +142,21 @@ GitHub will automatically close these issues when the PR is merged.
 ## Troubleshooting
 
 **Hooks not running?**
+
 ```bash
 ls -la .husky/
 npx husky install
 ```
 
 **GitHub CLI not authenticated?**
+
 ```bash
 gh auth status
 gh auth login
 ```
 
 **TODO.md not updating?**
+
 - Check that issue numbers match exactly
 - Verify `sed` is available (standard on macOS/Linux)
 - Manual fallback: Edit TODO.md directly

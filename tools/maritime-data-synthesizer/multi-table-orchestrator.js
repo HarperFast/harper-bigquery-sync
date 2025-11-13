@@ -41,6 +41,15 @@ export class MultiTableOrchestrator {
 		this.scenario = TEST_SCENARIOS[options.scenario] || TEST_SCENARIOS.realistic;
 		this.startTime = options.startTime ? new Date(options.startTime) : new Date();
 
+		// Continuous generation configuration
+		this.config = {
+			batchSize: parseInt(options.batchSize || 100, 10),
+			generationIntervalMs: parseInt(options.generationIntervalMs || 60000, 10), // 1 minute default
+			retentionDays: parseInt(options.retentionDays || 30, 10),
+			cleanupIntervalHours: parseInt(options.cleanupIntervalHours || 24, 10),
+			dataset: options.dataset,
+		};
+
 		// Initialize BigQuery client
 		this.bigquery = new BigQuery({
 			projectId: this.projectId,
@@ -50,6 +59,21 @@ export class MultiTableOrchestrator {
 
 		// Generate consistent MMSI list for all tables
 		this.mmsiList = this.generateMmsiList();
+
+		// State management for continuous generation
+		this.isRunning = false;
+		this.generationTimer = null;
+		this.cleanupTimer = null;
+		this.cleanupScheduleTimeout = null; // Track the initial setTimeout for cleanup
+		this.stats = {
+			totalBatchesGenerated: 0,
+			totalRecordsInserted: 0,
+			errors: 0,
+			startTime: null,
+		};
+
+		// Initialize generators for continuous mode
+		this.generators = null;
 
 		console.log(`\nMulti-Table Orchestrator initialized:`);
 		console.log(`  Scenario: ${options.scenario} (${this.scenario.description})`);
@@ -471,6 +495,366 @@ export class MultiTableOrchestrator {
 		}
 
 		return results;
+	}
+
+	/**
+	 * Initialize generators for continuous mode
+	 * @private
+	 */
+	initializeGenerators() {
+		if (this.generators) return;
+
+		this.generators = {
+			positions: new VesselPositionsGenerator({
+				startTime: new Date(),
+				durationMs: this.config.generationIntervalMs,
+				vessels: this.mmsiList.map((mmsi, i) => ({
+					mmsi,
+					startLat: 37.7749 + (i % 10) * 0.1,
+					startLon: -122.4194 + Math.floor(i / 10) * 0.1,
+					vesselName: `VESSEL_${mmsi}`,
+					vesselType: 'Container Ship',
+				})),
+			}),
+			events: new PortEventsGenerator({
+				startTime: new Date(),
+				durationMs: this.config.generationIntervalMs,
+				mmsiList: this.mmsiList,
+			}),
+			metadata: new VesselMetadataGenerator({
+				startTime: new Date(),
+				durationMs: this.config.generationIntervalMs,
+				mmsiList: this.mmsiList,
+			}),
+		};
+	}
+
+	/**
+	 * Check data range for a specific table
+	 * @param {string} dataset - Dataset name
+	 * @param {string} table - Table name
+	 * @param {string} timestampCol - Timestamp column name
+	 * @returns {Promise<Object>} Data range information
+	 */
+	async checkDataRange(dataset, table, timestampCol) {
+		try {
+			const query = `
+				SELECT
+					MIN(${timestampCol}) as oldest,
+					MAX(${timestampCol}) as newest,
+					COUNT(*) as total_records
+				FROM \`${this.projectId}.${dataset}.${table}\`
+			`;
+
+			const [rows] = await this.bigquery.query({ query, location: this.location });
+
+			if (rows.length === 0 || rows[0].total_records === '0') {
+				return {
+					hasData: false,
+					oldestTimestamp: null,
+					newestTimestamp: null,
+					totalRecords: 0,
+					daysCovered: 0,
+				};
+			}
+
+			const oldest = new Date(rows[0].oldest.value);
+			const newest = new Date(rows[0].newest.value);
+			const daysCovered = (newest - oldest) / (24 * 60 * 60 * 1000);
+
+			return {
+				hasData: true,
+				oldestTimestamp: oldest,
+				newestTimestamp: newest,
+				totalRecords: parseInt(rows[0].total_records),
+				daysCovered: Math.floor(daysCovered),
+			};
+		} catch (error) {
+			if (error.message.includes('Not found')) {
+				return {
+					hasData: false,
+					oldestTimestamp: null,
+					newestTimestamp: null,
+					totalRecords: 0,
+					daysCovered: 0,
+				};
+			}
+			throw error;
+		}
+	}
+
+	/**
+	 * Start continuous data generation with rolling window support
+	 * @param {Object} options - Start options
+	 * @param {string} options.dataset - Dataset name
+	 * @param {boolean} options.maintainWindow - Whether to maintain rolling window (default: true)
+	 * @param {number} options.targetDays - Target days of historical data (default: retentionDays)
+	 * @returns {Promise<void>}
+	 */
+	async start(options = {}) {
+		if (this.isRunning) {
+			console.log('Service is already running');
+			return;
+		}
+
+		const dataset = options.dataset || this.config.dataset;
+		const maintainWindow = options.maintainWindow !== false;
+		const targetDays = options.targetDays || this.config.retentionDays;
+
+		try {
+			this.isRunning = true;
+			this.stats.startTime = new Date();
+
+			console.log(`\n=== Starting Multi-Table Continuous Generation ===\n`);
+
+			// Initialize generators
+			this.initializeGenerators();
+
+			// Create dataset and tables if needed
+			await this.createDataset(dataset);
+			await this.createTables(dataset);
+
+			// Check and backfill each table if needed
+			if (maintainWindow) {
+				const tables = [
+					{ name: 'vessel_positions', timestampCol: 'timestamp', recordsPerDay: 1440 },
+					{ name: 'port_events', timestampCol: 'event_time', recordsPerDay: 100 },
+					{ name: 'vessel_metadata', timestampCol: 'last_updated', recordsPerDay: 10 },
+				];
+
+				for (const table of tables) {
+					console.log(`\nChecking ${table.name} (target: ${targetDays} days)...`);
+					const dataRange = await this.checkDataRange(dataset, table.name, table.timestampCol);
+
+					if (!dataRange.hasData) {
+						console.log(`  No existing data. Initializing with ${targetDays} days...`);
+						await this.backfillTable(dataset, table.name, targetDays, new Date(), table.recordsPerDay);
+					} else {
+						console.log(`  Found ${dataRange.totalRecords.toLocaleString()} records covering ${dataRange.daysCovered} days`);
+						console.log(`    Oldest: ${dataRange.oldestTimestamp.toISOString()}`);
+						console.log(`    Newest: ${dataRange.newestTimestamp.toISOString()}`);
+
+						const daysNeeded = targetDays - dataRange.daysCovered;
+						if (daysNeeded > 1) {
+							console.log(`  Backfilling ${Math.floor(daysNeeded)} days...`);
+							await this.backfillTable(dataset, table.name, Math.floor(daysNeeded), dataRange.oldestTimestamp, table.recordsPerDay);
+						} else {
+							console.log(`  Data window is sufficient (${dataRange.daysCovered}/${targetDays} days)`);
+						}
+					}
+				}
+			}
+
+			// Start generation loop
+			console.log('\n=== Starting Continuous Generation ===\n');
+			await this.generateAndInsertBatch(dataset);
+			this.generationTimer = setInterval(() => this.generateAndInsertBatch(dataset), this.config.generationIntervalMs);
+
+			// Start cleanup loop
+			this.cleanupScheduleTimeout = setTimeout(() => {
+				this.cleanupOldData(dataset);
+				this.cleanupTimer = setInterval(
+					() => this.cleanupOldData(dataset),
+					this.config.cleanupIntervalHours * 60 * 60 * 1000
+				);
+			}, 60000);
+
+			console.log('Multi-Table Orchestrator started');
+			console.log(`  Dataset: ${dataset}`);
+			console.log(`  Batch size: ${this.config.batchSize} records per table`);
+			console.log(`  Generation interval: ${this.config.generationIntervalMs / 1000} seconds`);
+			console.log(`  Rolling window: ${this.config.retentionDays} days`);
+			console.log(`  Cleanup interval: ${this.config.cleanupIntervalHours} hours`);
+			console.log(`  Tables: vessel_positions, port_events, vessel_metadata`);
+		} catch (error) {
+			this.isRunning = false;
+			console.error('Error starting service:', error);
+			throw error;
+		}
+	}
+
+	/**
+	 * Stop continuous generation
+	 */
+	stop() {
+		if (!this.isRunning) {
+			console.log('Service is not running');
+			return;
+		}
+
+		console.log('\nStopping Multi-Table Orchestrator...');
+
+		if (this.generationTimer) {
+			clearInterval(this.generationTimer);
+			this.generationTimer = null;
+		}
+
+		if (this.cleanupScheduleTimeout) {
+			clearTimeout(this.cleanupScheduleTimeout);
+			this.cleanupScheduleTimeout = null;
+		}
+
+		if (this.cleanupTimer) {
+			clearInterval(this.cleanupTimer);
+			this.cleanupTimer = null;
+		}
+
+		this.isRunning = false;
+
+		const runtime = ((Date.now() - this.stats.startTime) / 1000 / 60).toFixed(1);
+		console.log(`\nService stopped after ${runtime} minutes`);
+		console.log(`  Total batches: ${this.stats.totalBatchesGenerated}`);
+		console.log(`  Total records: ${this.stats.totalRecordsInserted.toLocaleString()}`);
+		console.log(`  Errors: ${this.stats.errors}`);
+	}
+
+	/**
+	 * Generate and insert one batch for all tables
+	 * @param {string} dataset - Dataset name
+	 * @private
+	 */
+	async generateAndInsertBatch(dataset) {
+		try {
+			const now = new Date();
+
+			// Generate records for each table
+			const positionsRecords = this.generators.positions.generate(this.config.batchSize);
+			const eventsRecords = this.generators.events.generate(Math.floor(this.config.batchSize / 10));
+			const metadataRecords = this.generators.metadata.generate(Math.floor(this.config.batchSize / 100));
+
+			// Insert in parallel
+			await Promise.all([
+				this.insertRecords(dataset, 'vessel_positions', positionsRecords),
+				this.insertRecords(dataset, 'port_events', eventsRecords),
+				this.insertRecords(dataset, 'vessel_metadata', metadataRecords),
+			]);
+
+			this.stats.totalBatchesGenerated++;
+			this.stats.totalRecordsInserted += positionsRecords.length + eventsRecords.length + metadataRecords.length;
+
+			console.log(
+				`[${now.toISOString()}] Batch #${this.stats.totalBatchesGenerated}: ` +
+					`${positionsRecords.length} positions, ` +
+					`${eventsRecords.length} events, ` +
+					`${metadataRecords.length} metadata`
+			);
+		} catch (error) {
+			this.stats.errors++;
+			console.error('Error generating batch:', error);
+		}
+	}
+
+	/**
+	 * Backfill historical data for a specific table
+	 * @param {string} dataset - Dataset name
+	 * @param {string} tableName - Table name
+	 * @param {number} days - Number of days to backfill
+	 * @param {Date} beforeTimestamp - Backfill before this timestamp
+	 * @param {number} recordsPerDay - Average records per day
+	 * @private
+	 */
+	async backfillTable(dataset, tableName, days, beforeTimestamp, recordsPerDay) {
+		const totalRecords = recordsPerDay * days;
+		const totalBatches = Math.ceil(totalRecords / this.config.batchSize);
+
+		console.log(`  Backfilling ${days} days (~${totalRecords.toLocaleString()} records in ${totalBatches} batches)...`);
+
+		let recordsInserted = 0;
+		const startTime = Date.now();
+		const oldestTimestamp = beforeTimestamp.getTime();
+
+		// Create temporary generator for backfill
+		let generator;
+		if (tableName === 'vessel_positions') {
+			generator = new VesselPositionsGenerator({
+				startTime: new Date(oldestTimestamp - days * 24 * 60 * 60 * 1000),
+				durationMs: days * 24 * 60 * 60 * 1000,
+				vessels: this.mmsiList.map((mmsi, i) => ({
+					mmsi,
+					startLat: 37.7749 + (i % 10) * 0.1,
+					startLon: -122.4194 + Math.floor(i / 10) * 0.1,
+					vesselName: `VESSEL_${mmsi}`,
+					vesselType: 'Container Ship',
+				})),
+			});
+		} else if (tableName === 'port_events') {
+			generator = new PortEventsGenerator({
+				startTime: new Date(oldestTimestamp - days * 24 * 60 * 60 * 1000),
+				durationMs: days * 24 * 60 * 60 * 1000,
+				mmsiList: this.mmsiList,
+			});
+		} else if (tableName === 'vessel_metadata') {
+			generator = new VesselMetadataGenerator({
+				startTime: new Date(oldestTimestamp - days * 24 * 60 * 60 * 1000),
+				durationMs: days * 24 * 60 * 60 * 1000,
+				mmsiList: this.mmsiList,
+			});
+		}
+
+		for (let batchNum = 0; batchNum < totalBatches; batchNum++) {
+			const batchSize = Math.min(this.config.batchSize, totalRecords - recordsInserted);
+			const records = generator.generate(batchSize);
+
+			await this.insertRecords(dataset, tableName, records);
+			recordsInserted += records.length;
+
+			if ((batchNum + 1) % 10 === 0 || batchNum === totalBatches - 1) {
+				const progress = ((recordsInserted / totalRecords) * 100).toFixed(1);
+				const elapsed = (Date.now() - startTime) / 1000;
+				const rate = recordsInserted / elapsed;
+				const remaining = (totalRecords - recordsInserted) / rate;
+
+				process.stdout.write(
+					`\r  Progress: ${progress}% | ${recordsInserted.toLocaleString()}/${totalRecords.toLocaleString()} | ` +
+						`Rate: ${Math.floor(rate)} records/sec | ETA: ${Math.ceil(remaining / 60)} min`
+				);
+			}
+
+			if (batchNum < totalBatches - 1) {
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+			}
+		}
+
+		const totalTime = ((Date.now() - startTime) / 1000 / 60).toFixed(1);
+		console.log(`\n  ✓ Backfilled ${recordsInserted.toLocaleString()} records in ${totalTime} minutes`);
+	}
+
+	/**
+	 * Clean up old data beyond retention period
+	 * @param {string} dataset - Dataset name
+	 * @private
+	 */
+	async cleanupOldData(dataset) {
+		console.log(`\n[${new Date().toISOString()}] Running cleanup (retention: ${this.config.retentionDays} days)...`);
+
+		const cutoffDate = new Date(Date.now() - this.config.retentionDays * 24 * 60 * 60 * 1000);
+
+		const tables = [
+			{ name: 'vessel_positions', timestampCol: 'timestamp' },
+			{ name: 'port_events', timestampCol: 'event_time' },
+			{ name: 'vessel_metadata', timestampCol: 'last_updated' },
+		];
+
+		for (const table of tables) {
+			try {
+				const [result] = await this.bigquery.query({
+					query: `
+						DELETE FROM \`${this.projectId}.${dataset}.${table.name}\`
+						WHERE ${table.timestampCol} < TIMESTAMP('${cutoffDate.toISOString()}')
+					`,
+					location: this.location,
+				});
+
+				const numDeleted = result.numDmlAffectedRows || 0;
+				if (numDeleted > 0) {
+					console.log(`  ${table.name}: Deleted ${numDeleted} old records`);
+				} else {
+					console.log(`  ${table.name}: No records to delete`);
+				}
+			} catch (error) {
+				console.error(`  Error cleaning ${table.name}:`, error.message);
+			}
+		}
 	}
 }
 

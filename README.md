@@ -66,7 +66,7 @@ npx maritime-data-synthesizer initialize realistic
 - `clear` - Clear all data (keeps schema)
 - `reset N` - Delete and reload with N days of data
 
-**Note:** Multi-table mode (current default config) supports `initialize` command. For continuous generation with `start`, use single-table config format.
+**Note:** Both single-table and multi-table modes now support all commands including `start` for continuous generation with rolling windows.
 
 **Documentation:**
 
@@ -183,6 +183,42 @@ Each BigQuery table MUST sync to a **different** Harper table. Multiple BigQuery
 If you need to combine data from multiple BigQuery tables, sync them to separate Harper tables and join at query time.
 
 See `config.multi-table.yaml` for a complete example.
+
+### Retry Configuration
+
+The plugin implements exponential backoff with jitter for transient BigQuery errors (rate limits, quota exceeded, temporary service unavailability):
+
+```yaml
+bigquery:
+  projectId: your-project
+  credentials: service-account-key.json
+  location: US
+
+  # Optional retry configuration (defaults shown)
+  maxRetries: 5 # Maximum number of retry attempts
+  initialRetryDelay: 1000 # Initial delay in milliseconds (doubles each retry)
+
+  tables:
+    - id: vessel_positions
+      # ... table configuration
+```
+
+**Retry Behavior:**
+
+- **Retryable errors**: Rate limits, quota exceeded, internal errors, service unavailable (503), too many requests (429)
+- **Non-retryable errors**: Invalid queries, permission errors, schema mismatches - fail immediately
+- **Backoff strategy**: Initial delay × 2^attempt with random jitter, capped at 30 seconds
+- **Logging**: Warnings on retry attempts, errors on final failure with detailed error information
+
+**Example backoff delays** (with jitter):
+
+- Attempt 1: 1000-2000ms
+- Attempt 2: 2000-4000ms
+- Attempt 3: 4000-8000ms
+- Attempt 4: 8000-16000ms
+- Attempt 5: 16000-30000ms (capped)
+
+This prevents overwhelming BigQuery API during transient issues while quickly failing on permanent errors.
 
 ### Data Storage
 

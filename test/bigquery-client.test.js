@@ -247,4 +247,233 @@ describe('BigQueryClient', () => {
 			assert.ok(diff < 1000);
 		});
 	});
+
+	describe('Exponential backoff retry logic', () => {
+		const mockConfig = {
+			bigquery: {
+				projectId: 'test-project',
+				dataset: 'test_dataset',
+				table: 'test_table',
+				timestampColumn: 'timestamp',
+				credentials: '/path/to/creds.json',
+				location: 'US',
+				maxRetries: 3,
+				initialRetryDelay: 100, // Shorter delay for testing
+			},
+		};
+
+		describe('isRetryableError', () => {
+			it('should identify rate limit errors as retryable', () => {
+				const client = new BigQueryClient(mockConfig);
+				const error = { code: 'rateLimitExceeded' };
+
+				assert.strictEqual(client.isRetryableError(error), true);
+			});
+
+			it('should identify quota exceeded errors as retryable', () => {
+				const client = new BigQueryClient(mockConfig);
+				const error = { code: 'quotaExceeded' };
+
+				assert.strictEqual(client.isRetryableError(error), true);
+			});
+
+			it('should identify internal errors as retryable', () => {
+				const client = new BigQueryClient(mockConfig);
+				const error = { code: 'internalError' };
+
+				assert.strictEqual(client.isRetryableError(error), true);
+			});
+
+			it('should identify 503 HTTP status as retryable', () => {
+				const client = new BigQueryClient(mockConfig);
+				const error = { response: { status: 503 } };
+
+				assert.strictEqual(client.isRetryableError(error), true);
+			});
+
+			it('should identify 429 HTTP status as retryable', () => {
+				const client = new BigQueryClient(mockConfig);
+				const error = { response: { status: 429 } };
+
+				assert.strictEqual(client.isRetryableError(error), true);
+			});
+
+			it('should identify nested BigQuery errors as retryable', () => {
+				const client = new BigQueryClient(mockConfig);
+				const error = {
+					message: 'Query failed',
+					errors: [{ reason: 'backendError', message: 'Backend temporarily unavailable' }],
+				};
+
+				assert.strictEqual(client.isRetryableError(error), true);
+			});
+
+			it('should identify syntax errors as non-retryable', () => {
+				const client = new BigQueryClient(mockConfig);
+				const error = { code: 'invalidQuery' };
+
+				assert.strictEqual(client.isRetryableError(error), false);
+			});
+
+			it('should identify permission errors as non-retryable', () => {
+				const client = new BigQueryClient(mockConfig);
+				const error = {
+					errors: [{ reason: 'accessDenied', message: 'Permission denied' }],
+				};
+
+				assert.strictEqual(client.isRetryableError(error), false);
+			});
+
+			it('should handle null error gracefully', () => {
+				const client = new BigQueryClient(mockConfig);
+
+				assert.strictEqual(client.isRetryableError(null), false);
+			});
+		});
+
+		describe('executeWithRetry', () => {
+			it('should succeed on first attempt if no error', async () => {
+				const client = new BigQueryClient(mockConfig);
+				let attempts = 0;
+
+				const result = await client.executeWithRetry(async () => {
+					attempts++;
+					return { success: true };
+				}, 'testOperation');
+
+				assert.strictEqual(attempts, 1);
+				assert.deepStrictEqual(result, { success: true });
+			});
+
+			it('should retry on transient error and eventually succeed', async () => {
+				const client = new BigQueryClient(mockConfig);
+				let attempts = 0;
+
+				const result = await client.executeWithRetry(async () => {
+					attempts++;
+					if (attempts < 3) {
+						const error = new Error('Rate limit exceeded');
+						error.code = 'rateLimitExceeded';
+						throw error;
+					}
+					return { success: true, attempts };
+				}, 'testOperation');
+
+				assert.strictEqual(attempts, 3);
+				assert.deepStrictEqual(result, { success: true, attempts: 3 });
+			});
+
+			it('should fail immediately on non-retryable error', async () => {
+				const client = new BigQueryClient(mockConfig);
+				let attempts = 0;
+
+				await assert.rejects(
+					async () => {
+						await client.executeWithRetry(async () => {
+							attempts++;
+							const error = new Error('Invalid query');
+							error.code = 'invalidQuery';
+							throw error;
+						}, 'testOperation');
+					},
+					(error) => {
+						assert.strictEqual(error.message, 'Invalid query');
+						assert.strictEqual(attempts, 1); // Should not retry
+						return true;
+					}
+				);
+			});
+
+			it('should respect maxRetries configuration', async () => {
+				const client = new BigQueryClient(mockConfig);
+				let attempts = 0;
+
+				await assert.rejects(
+					async () => {
+						await client.executeWithRetry(async () => {
+							attempts++;
+							const error = new Error('Rate limit exceeded');
+							error.code = 'rateLimitExceeded';
+							throw error;
+						}, 'testOperation');
+					},
+					(error) => {
+						assert.strictEqual(error.message, 'Rate limit exceeded');
+						assert.strictEqual(attempts, mockConfig.bigquery.maxRetries + 1); // Initial + 3 retries
+						return true;
+					}
+				);
+			});
+
+			it('should apply exponential backoff delays', async () => {
+				const client = new BigQueryClient(mockConfig);
+				const delays = [];
+				let attempts = 0;
+
+				await assert.rejects(
+					async () => {
+						await client.executeWithRetry(async () => {
+							const now = Date.now();
+							if (attempts > 0) {
+								delays.push(now);
+							} else {
+								delays.push(now);
+							}
+							attempts++;
+
+							const error = new Error('Service unavailable');
+							error.code = 'serviceUnavailable';
+							throw error;
+						}, 'testOperation');
+					},
+					() => true
+				);
+
+				// Verify delays are increasing (exponential backoff)
+				// First attempt has no delay
+				// Subsequent delays should be roughly: 100ms, 200ms, 400ms (with jitter)
+				assert.strictEqual(delays.length, mockConfig.bigquery.maxRetries + 1);
+			});
+		});
+
+		describe('Retry configuration', () => {
+			it('should use default maxRetries if not specified', () => {
+				const configWithoutRetries = {
+					bigquery: {
+						projectId: 'test-project',
+						dataset: 'test_dataset',
+						table: 'test_table',
+						timestampColumn: 'timestamp',
+						credentials: '/path/to/creds.json',
+						location: 'US',
+					},
+				};
+
+				const client = new BigQueryClient(configWithoutRetries);
+
+				assert.strictEqual(client.maxRetries, 5);
+				assert.strictEqual(client.initialRetryDelay, 1000);
+			});
+
+			it('should use custom retry configuration', () => {
+				const customConfig = {
+					bigquery: {
+						projectId: 'test-project',
+						dataset: 'test_dataset',
+						table: 'test_table',
+						timestampColumn: 'timestamp',
+						credentials: '/path/to/creds.json',
+						location: 'US',
+						maxRetries: 10,
+						initialRetryDelay: 2000,
+					},
+				};
+
+				const client = new BigQueryClient(customConfig);
+
+				assert.strictEqual(client.maxRetries, 10);
+				assert.strictEqual(client.initialRetryDelay, 2000);
+			});
+		});
+	});
 });

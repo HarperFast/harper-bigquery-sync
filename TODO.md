@@ -6,7 +6,7 @@ Consolidated task list for Harper BigQuery Sync plugin and Maritime Data Synthes
 
 ### Production Readiness
 
-- [ ] **Add exponential backoff for transient BigQuery errors** [#3](https://github.com/HarperFast/harper-bigquery-sync/issues/3)
+- [x] **Add exponential backoff for transient BigQuery errors** [#3](https://github.com/HarperFast/harper-bigquery-sync/issues/3)
   - Currently errors are retried with simple logic
   - Need exponential backoff strategy for transient failures
   - Prevents overwhelming BigQuery API during issues
@@ -19,7 +19,7 @@ Consolidated task list for Harper BigQuery Sync plugin and Maritime Data Synthes
 
 ### Code Quality
 
-- [ ] **Fix memory leak in journey tracking** [#5](https://github.com/HarperFast/harper-bigquery-sync/issues/5)
+- [x] **Fix memory leak in journey tracking** [#5](https://github.com/HarperFast/harper-bigquery-sync/issues/5)
   - Memory leak in `src/generator.js` journey tracking system
   - Blocks re-enabling certain tests
   - Related to vessel position generation
@@ -28,7 +28,7 @@ Consolidated task list for Harper BigQuery Sync plugin and Maritime Data Synthes
 
 ### Feature Enhancements
 
-- [ ] **Multi-table rolling window support** [#6](https://github.com/HarperFast/harper-bigquery-sync/issues/6)
+- [x] **Multi-table rolling window support** [#6](https://github.com/HarperFast/harper-bigquery-sync/issues/6)
   - Currently multi-table orchestrator only supports `initialize` command
   - Add `start` command for continuous generation with rolling window
   - Add `backfill` capability

@@ -40,6 +40,10 @@ export class BigQueryClient {
 		this.timestampColumn = config.bigquery.timestampColumn;
 		this.columns = config.bigquery.columns || ['*'];
 
+		// Retry configuration with exponential backoff
+		this.maxRetries = config.bigquery.maxRetries || 5;
+		this.initialRetryDelay = config.bigquery.initialRetryDelay || 1000; // 1 second
+
 		// Initialize query builder with column selection
 		this.queryBuilder = new QueryBuilder({
 			dataset: this.dataset,
@@ -49,6 +53,9 @@ export class BigQueryClient {
 		});
 
 		logger.info(`[BigQueryClient] Client initialized successfully with columns: ${this.queryBuilder.getColumnList()}`);
+		logger.info(
+			`[BigQueryClient] Retry configuration - maxRetries: ${this.maxRetries}, initialDelay: ${this.initialRetryDelay}ms`
+		);
 	}
 
 	/**
@@ -61,6 +68,99 @@ export class BigQueryClient {
 		const entries = Object.entries(params);
 		const resolvedEntries = await Promise.all(entries.map(async ([key, value]) => [key, await value]));
 		return Object.fromEntries(resolvedEntries);
+	}
+
+	/**
+	 * Determines if a BigQuery error is transient and should be retried
+	 * @param {Error} error - The error to check
+	 * @returns {boolean} True if the error is retryable
+	 * @private
+	 */
+	isRetryableError(error) {
+		if (!error) return false;
+
+		// Check error code for retryable conditions
+		const retryableCodes = [
+			'rateLimitExceeded',
+			'quotaExceeded',
+			'internalError',
+			'backendError',
+			'serviceUnavailable',
+			'timeout',
+			503, // Service Unavailable
+			429, // Too Many Requests
+		];
+
+		// Check error.code
+		if (error.code && retryableCodes.includes(error.code)) {
+			return true;
+		}
+
+		// Check nested errors array (BigQuery specific)
+		if (error.errors && Array.isArray(error.errors)) {
+			return error.errors.some((e) => e.reason && retryableCodes.includes(e.reason));
+		}
+
+		// Check HTTP status code
+		if (error.response && retryableCodes.includes(error.response.status)) {
+			return true;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Executes a query with exponential backoff retry logic
+	 * @param {Function} queryFn - Async function that executes the query
+	 * @param {string} operation - Name of the operation (for logging)
+	 * @returns {Promise<*>} Query result
+	 * @private
+	 */
+	async executeWithRetry(queryFn, operation) {
+		let lastError;
+
+		for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+			try {
+				return await queryFn();
+			} catch (error) {
+				lastError = error;
+
+				// Check if we should retry
+				const isRetryable = this.isRetryableError(error);
+				const attemptsRemaining = this.maxRetries - attempt;
+
+				if (!isRetryable || attemptsRemaining === 0) {
+					// Log detailed error information
+					logger.error(
+						`[BigQueryClient.${operation}] Query failed (attempt ${attempt + 1}/${this.maxRetries + 1}): ${error.message}`
+					);
+					if (error.errors) {
+						error.errors.forEach((e) => logger.error(`  ${e.reason} at ${e.location}: ${e.message}`));
+					}
+					throw error;
+				}
+
+				// Calculate backoff delay with jitter
+				// Exponential backoff: initialDelay * 2^attempt
+				// Jitter: random value between 0 and calculated delay
+				const exponentialDelay = this.initialRetryDelay * Math.pow(2, attempt);
+				const jitter = Math.random() * exponentialDelay;
+				const delay = Math.min(exponentialDelay + jitter, 30000); // Cap at 30 seconds
+
+				logger.warn(
+					`[BigQueryClient.${operation}] Transient error (attempt ${attempt + 1}/${this.maxRetries + 1}): ${error.message}. Retrying in ${Math.round(delay)}ms...`
+				);
+				if (error.errors) {
+					error.errors.forEach((e) => logger.warn(`  ${e.reason}: ${e.message}`));
+				}
+
+				// Wait before retrying
+				await new Promise((resolve) => setTimeout(resolve, delay));
+			}
+		}
+
+		// Should never reach here, but just in case
+		throw lastError;
 	}
 
 	/**
@@ -104,7 +204,7 @@ export class BigQueryClient {
 
 		logger.trace(`[BigQueryClient.pullPartition] Generated SQL query: ${query}`);
 
-		try {
+		return await this.executeWithRetry(async () => {
 			logger.debug('[BigQueryClient.pullPartition] Executing BigQuery query...');
 			const startTime = Date.now();
 			const [rows] = await this.client.query(options);
@@ -114,13 +214,7 @@ export class BigQueryClient {
 				`[BigQueryClient.pullPartition] First row timestamp: ${rows.length > 0 ? Date(rows[0][this.timestampColumn]) : 'N/A'}`
 			);
 			return rows;
-		} catch (error) {
-			logger.error(`[BigQueryClient.pullPartition] BigQuery query failed: ${error.message}`, error);
-			if (error.errors) {
-				error.errors.forEach((e) => logger.error(`  ${e.reason} at ${e.location}: ${e.message}`));
-			}
-			throw error;
-		}
+		}, 'pullPartition');
 	}
 
 	/**
@@ -177,7 +271,7 @@ export class BigQueryClient {
 			params: { clusterSize, nodeId },
 		};
 
-		try {
+		return await this.executeWithRetry(async () => {
 			logger.debug('[BigQueryClient.countPartition] Executing count query...');
 			const startTime = Date.now();
 			const [rows] = await this.client.query(options);
@@ -187,10 +281,7 @@ export class BigQueryClient {
 				`[BigQueryClient.countPartition] Count complete - ${count} records in partition (took ${duration}ms)`
 			);
 			return count;
-		} catch (error) {
-			logger.error(`[BigQueryClient.countPartition] Count query error: ${error.message}`, error);
-			throw error;
-		}
+		}, 'countPartition');
 	}
 
 	/**
@@ -221,13 +312,15 @@ export class BigQueryClient {
 		};
 
 		try {
-			logger.debug('[BigQueryClient.verifyRecord] Executing verification query...');
-			const [rows] = await this.client.query(options);
-			const exists = rows.length > 0;
-			logger.debug(`[BigQueryClient.verifyRecord] Record ${exists ? 'EXISTS' : 'NOT FOUND'} in BigQuery`);
-			return exists;
+			return await this.executeWithRetry(async () => {
+				logger.debug('[BigQueryClient.verifyRecord] Executing verification query...');
+				const [rows] = await this.client.query(options);
+				const exists = rows.length > 0;
+				logger.debug(`[BigQueryClient.verifyRecord] Record ${exists ? 'EXISTS' : 'NOT FOUND'} in BigQuery`);
+				return exists;
+			}, 'verifyRecord');
 		} catch (error) {
-			logger.error(`[BigQueryClient.verifyRecord] Verification error: ${error.message}`, error);
+			logger.error(`[BigQueryClient.verifyRecord] Verification error after retries: ${error.message}`, error);
 			return false;
 		}
 	}
