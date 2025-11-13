@@ -168,4 +168,162 @@ describe('SchemaManager', () => {
 			assert.strictEqual(manager.compareTypes('[String]', 'String'), false);
 		});
 	});
+
+	describe('ensureTable', () => {
+		it('should create new table when it does not exist', async () => {
+			const mockBigQueryTable = {
+				getMetadata: async () => [
+					{
+						schema: {
+							fields: [
+								{ name: 'id', type: 'STRING', mode: 'REQUIRED' },
+								{ name: 'name', type: 'STRING', mode: 'NULLABLE' },
+							],
+						},
+					},
+				],
+			};
+
+			const mockDataset = {
+				table: () => mockBigQueryTable,
+			};
+
+			const mockBigQueryClient = {
+				client: {
+					dataset: () => mockDataset,
+				},
+			};
+
+			let describedTable = null;
+			let createdTable = null;
+			let createdAttributes = null;
+			let createdIndexes = null;
+
+			const mockOperationsClient = {
+				describeTable: async () => describedTable,
+				createTable: async (table, attributes, indexes) => {
+					createdTable = table;
+					createdAttributes = attributes;
+					createdIndexes = indexes;
+					return { created: true };
+				},
+			};
+
+			const manager = new SchemaManager({
+				bigQueryClient: mockBigQueryClient,
+				config: { bigquery: { timestampColumn: 'timestamp' } },
+			});
+
+			// Override the operations client with our mock
+			manager.operationsClient = mockOperationsClient;
+
+			const result = await manager.ensureTable('TestTable', 'test_dataset', 'test_table', 'timestamp');
+
+			assert.strictEqual(result.action, 'created');
+			assert.strictEqual(createdTable, 'TestTable');
+			assert.deepStrictEqual(createdAttributes, {
+				id: { type: 'String', required: true },
+				name: { type: 'String', required: false },
+			});
+			assert.ok(Array.isArray(createdIndexes));
+		});
+
+		it('should add new columns when table exists but schema changed', async () => {
+			const mockBigQueryTable = {
+				getMetadata: async () => [
+					{
+						schema: {
+							fields: [
+								{ name: 'id', type: 'STRING', mode: 'REQUIRED' },
+								{ name: 'email', type: 'STRING', mode: 'NULLABLE' },
+							],
+						},
+					},
+				],
+			};
+
+			const mockDataset = {
+				table: () => mockBigQueryTable,
+			};
+
+			const mockBigQueryClient = {
+				client: {
+					dataset: () => mockDataset,
+				},
+			};
+
+			const existingSchema = {
+				attributes: {
+					id: { type: 'String', required: true },
+				},
+			};
+
+			let addedAttributes = null;
+
+			const mockOperationsClient = {
+				describeTable: async () => existingSchema,
+				addAttributes: async (table, attributes) => {
+					addedAttributes = attributes;
+					return { added: true };
+				},
+			};
+
+			const manager = new SchemaManager({
+				bigQueryClient: mockBigQueryClient,
+				config: { bigquery: { timestampColumn: 'timestamp' } },
+			});
+
+			manager.operationsClient = mockOperationsClient;
+
+			const result = await manager.ensureTable('TestTable', 'test_dataset', 'test_table', 'timestamp');
+
+			assert.strictEqual(result.action, 'migrated');
+			assert.deepStrictEqual(addedAttributes, {
+				email: { type: 'String', required: false },
+			});
+		});
+
+		it('should return no-op when schemas match', async () => {
+			const mockBigQueryTable = {
+				getMetadata: async () => [
+					{
+						schema: {
+							fields: [{ name: 'id', type: 'STRING', mode: 'REQUIRED' }],
+						},
+					},
+				],
+			};
+
+			const mockDataset = {
+				table: () => mockBigQueryTable,
+			};
+
+			const mockBigQueryClient = {
+				client: {
+					dataset: () => mockDataset,
+				},
+			};
+
+			const existingSchema = {
+				attributes: {
+					id: { type: 'String', required: true },
+				},
+			};
+
+			const mockOperationsClient = {
+				describeTable: async () => existingSchema,
+			};
+
+			const manager = new SchemaManager({
+				bigQueryClient: mockBigQueryClient,
+				config: { bigquery: { timestampColumn: 'timestamp' } },
+			});
+
+			manager.operationsClient = mockOperationsClient;
+
+			const result = await manager.ensureTable('TestTable', 'test_dataset', 'test_table', 'timestamp');
+
+			assert.strictEqual(result.action, 'none');
+		});
+	});
 });

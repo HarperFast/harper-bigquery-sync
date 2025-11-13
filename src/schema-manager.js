@@ -98,14 +98,53 @@ export class SchemaManager {
 
 	/**
 	 * Ensures a Harper table exists and matches BigQuery schema
-	 * @param {string} _harperTableName - Harper table name
-	 * @param {string} _bigQueryDataset - BigQuery dataset
-	 * @param {string} _bigQueryTable - BigQuery table name
-	 * @param {string} _timestampColumn - Timestamp column name
+	 * @param {string} harperTableName - Harper table name
+	 * @param {string} bigQueryDataset - BigQuery dataset
+	 * @param {string} bigQueryTable - BigQuery table name
+	 * @param {string} _timestampColumn - Timestamp column name (for future use)
 	 * @returns {Promise<Object>} Result of ensure operation
 	 */
-	async ensureTable(_harperTableName, _bigQueryDataset, _bigQueryTable, _timestampColumn) {
-		// Implementation will be added when we integrate with actual APIs
-		throw new Error('Not implemented yet');
+	async ensureTable(harperTableName, bigQueryDataset, bigQueryTable, _timestampColumn) {
+		// 1. Get BigQuery schema
+		const bqTable = this.bigQueryClient.client.dataset(bigQueryDataset).table(bigQueryTable);
+		const [metadata] = await bqTable.getMetadata();
+		const bigQuerySchema = metadata.schema;
+
+		// 2. Check if Harper table exists
+		const harperSchema = await this.operationsClient.describeTable(harperTableName);
+
+		// 3. Determine what needs to be done
+		const migration = this.determineMigrationNeeds(harperSchema, bigQuerySchema);
+
+		// 4. Execute migration
+		if (migration.action === 'create') {
+			// Create new table with all attributes
+			const indexes = this.indexStrategy.getIndexes(bigQuerySchema.fields);
+			await this.operationsClient.createTable(harperTableName, migration.attributesToAdd, indexes);
+
+			return {
+				action: 'created',
+				table: harperTableName,
+				attributes: Object.keys(migration.attributesToAdd),
+				indexes,
+			};
+		}
+
+		if (migration.action === 'migrate') {
+			// Add new attributes to existing table
+			await this.operationsClient.addAttributes(harperTableName, migration.attributesToAdd);
+
+			return {
+				action: 'migrated',
+				table: harperTableName,
+				attributesAdded: Object.keys(migration.attributesToAdd),
+			};
+		}
+
+		// No changes needed
+		return {
+			action: 'none',
+			table: harperTableName,
+		};
 	}
 }
