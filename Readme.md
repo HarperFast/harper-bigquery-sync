@@ -40,11 +40,13 @@ See [System Overview](docs/SYSTEM-OVERVIEW.md) for how they work together, or ju
 The maritime synthesizer generates test data TO BigQuery, which the plugin then syncs FROM BigQuery to Harper.
 
 **Prerequisites:**
+
 1. GCP project with BigQuery enabled
 2. Service account key with BigQuery write permissions
 3. Update `config.yaml` with your BigQuery credentials
 
 **Quick Start:**
+
 ```bash
 # Install dependencies (if not already done)
 npm install
@@ -54,6 +56,7 @@ npx maritime-data-synthesizer initialize realistic
 ```
 
 **Available Commands:**
+
 - `initialize <scenario>` - Generate test data (scenarios: small, realistic, stress)
   - `small`: 100 positions, 10 events, 20 metadata (~1 hour of data)
   - `realistic`: 10k positions, 500 events, 100 metadata (~24 hours)
@@ -66,6 +69,7 @@ npx maritime-data-synthesizer initialize realistic
 **Note:** Multi-table mode (current default config) supports `initialize` command. For continuous generation with `start`, use single-table config format.
 
 **Documentation:**
+
 - **[5-Minute Quick Start](docs/QUICKSTART.md)** - Get generating data immediately
 - **[System Overview](docs/SYSTEM-OVERVIEW.md)** - How plugin + synthesizer work together
 - **[Full Guide](docs/maritime-data-synthesizer.md)** - Comprehensive synthesizer documentation
@@ -74,6 +78,7 @@ npx maritime-data-synthesizer initialize realistic
 ## Architecture
 
 Each node:
+
 1. Discovers cluster topology via Harper's clustering API
 2. Calculates its node ID from ordered peer list
 3. Pulls only records where `hash(timestamp) % clusterSize == nodeId`
@@ -83,6 +88,7 @@ Each node:
 ## Installation
 
 ### Option 1: Deploy on Fabric (Recommended)
+
 1. Sign up at [fabric.harper.fast](https://fabric.harper.fast)
 2. Create a new application
 3. Upload this component
@@ -90,9 +96,11 @@ Each node:
 5. Component auto-deploys across your cluster
 
 ### Option 2: Self-Hosted
+
 1. Deploy Harper cluster (3+ nodes recommended) - [Quick start guide](https://docs.harperdb.io/docs/getting-started/quickstart)
 2. Configure clustering between nodes - [Clustering docs](https://docs.harperdb.io/docs/developers/replication)
 3. Copy this component to each node:
+
    ```bash
    harper deploy bigquery-sync /path/to/component
    ```
@@ -134,7 +142,7 @@ bigquery:
       dataset: maritime_tracking
       table: port_events
       timestampColumn: event_time
-      columns: ['*']  # Fetch all columns
+      columns: ['*'] # Fetch all columns
       targetTable: PortEvents
       sync:
         initialBatchSize: 5000
@@ -143,6 +151,7 @@ bigquery:
 ```
 
 **Key Features:**
+
 - Each table syncs to a separate Harper table
 - Independent batch sizes and sync rates per table
 - Different timestamp column names supported
@@ -152,6 +161,7 @@ bigquery:
 
 **Important Constraint:**
 Each BigQuery table MUST sync to a **different** Harper table. Multiple BigQuery tables syncing to the same Harper table is not supported and will cause:
+
 - Record ID collisions and data overwrites
 - Validation failures (can only validate one source)
 - Checkpoint confusion (different sync states)
@@ -167,27 +177,28 @@ BigQuery records are stored as-is at the top level:
 
 ```graphql
 type BigQueryData @table {
-  id: ID! @primaryKey
-  # All BigQuery fields stored directly at top level
-  _syncedAt: String @createdTime
+	id: ID! @primaryKey
+	# All BigQuery fields stored directly at top level
+	_syncedAt: String @createdTime
 }
 ```
 
 Example stored record:
+
 ```json
 {
-  "id": "a1b2c3d4e5f6g7h8",
-  "_syncedAt": "2025-11-04T16:00:00Z",
-  "timestamp": "2025-11-04T15:59:00Z",
-  "mmsi": "367123456",
-  "imo": "IMO9876543",
-  "vessel_name": "MARITIME VOYAGER",
-  "vessel_type": "Container Ship",
-  "latitude": 37.7749,
-  "longitude": -122.4194,
-  "speed_knots": 12.5,
-  "heading": 275,
-  "status": "Under way using engine"
+	"id": "a1b2c3d4e5f6g7h8",
+	"_syncedAt": "2025-11-04T16:00:00Z",
+	"timestamp": "2025-11-04T15:59:00Z",
+	"mmsi": "367123456",
+	"imo": "IMO9876543",
+	"vessel_name": "MARITIME VOYAGER",
+	"vessel_type": "Container Ship",
+	"latitude": 37.7749,
+	"longitude": -122.4194,
+	"speed_knots": 12.5,
+	"heading": 275,
+	"status": "Under way using engine"
 }
 ```
 
@@ -196,6 +207,7 @@ This provides maximum flexibility - all BigQuery fields are directly queryable w
 ### BigQuery Setup
 
 Ensure service account has:
+
 - `bigquery.jobs.create` permission
 - `bigquery.tables.getData` permission on target table
 
@@ -215,6 +227,7 @@ Additional considerations for production deployments:
 ### Batch Size Tuning
 
 Adjust based on:
+
 - Record size
 - Network bandwidth
 - IOPS capacity
@@ -252,12 +265,14 @@ LIMIT 10;
 ## Monitoring
 
 ### Check Sync Status
+
 ```javascript
 // Query checkpoint table
 SELECT * FROM SyncCheckpoint ORDER BY nodeId;
 ```
 
 ### View Recent Audits
+
 ```javascript
 // Check validation results
 SELECT * FROM SyncAudit
@@ -266,6 +281,7 @@ ORDER BY timestamp DESC;
 ```
 
 ### Monitor Lag
+
 ```javascript
 // Calculate current lag
 SELECT
@@ -279,6 +295,7 @@ FROM SyncCheckpoint;
 ## API Endpoints
 
 ### Get Status
+
 ```bash
 GET /SyncControl
 ```
@@ -286,6 +303,7 @@ GET /SyncControl
 Returns current sync status for the node.
 
 ### Control Sync
+
 ```bash
 POST /SyncControl
 {
@@ -297,16 +315,19 @@ POST /SyncControl
 ## Troubleshooting
 
 ### Node Not Ingesting
+
 - Check BigQuery credentials
 - Verify node can reach BigQuery API
 - Check checkpoint table for errors
 
 ### Data Drift Detected
+
 - Check for partition key collisions
 - Verify all nodes are running
 - Review checkpoint timestamps across nodes
 
 ### High Lag
+
 - Increase batch sizes
 - Add more nodes
 - Check IOPS capacity
@@ -316,6 +337,7 @@ POST /SyncControl
 ## Performance Tuning
 
 ### IOPS Calculation
+
 ```
 Indexes: 1 primary + 1 timestamp = 2 indexes
 IOPS per record: ~4 IOPS
@@ -326,6 +348,7 @@ Required IOPS: 20,000 per node
 Learn more about [Harper's storage architecture](https://docs.harperdb.io/docs/reference/storage-algorithm)
 
 ### Scaling Guidelines
+
 - 3 nodes: ~15K records/sec total
 - 6 nodes: ~30K records/sec total
 - 12 nodes: ~60K records/sec total
@@ -341,9 +364,11 @@ Learn more about [Harper's storage architecture](https://docs.harperdb.io/docs/r
 ## Roadmap
 
 ### Crawl (v1.0 - Complete)
+
 **Status:** ✅ Shipped
 
 Single-threaded, single-table ingestion:
+
 - ✅ Modulo-based partitioning for distributed workload
 - ✅ Adaptive batch sizing (phase-based: initial/catchup/steady)
 - ✅ Checkpoint-based recovery per node
@@ -351,9 +376,11 @@ Single-threaded, single-table ingestion:
 - ✅ Monitoring via REST API (`/SyncControl`)
 
 ### 🚶 Walk (v2.0 - Complete)
+
 **Status:** ✅ Shipped
 
 Multi-table ingestion with column selection:
+
 - ✅ **Multiple BigQuery tables** - Ingest from multiple tables simultaneously
 - ✅ **Column selection** - Choose specific columns per table (reduce data transfer)
 - ✅ **Per-table configuration** - Different batch sizes, intervals, and strategies per table
@@ -361,11 +388,13 @@ Multi-table ingestion with column selection:
 - ✅ **Unified monitoring** - Single dashboard for all table ingestions
 
 **Use Cases:**
+
 - Ingest multiple related datasets (e.g., vessels, ports, weather)
 - Reduce costs by selecting only needed columns
 - Different sync strategies per data type (real-time vs batch)
 
 **Configuration Example:**
+
 ```yaml
 bigquery:
   projectId: your-project
@@ -395,9 +424,11 @@ bigquery:
 ```
 
 ### 🏃 Run (v3.0 - Planned)
+
 **Status:** 📋 Future
 
 Multi-threaded, multi-instance Harper cluster support:
+
 - [ ] **Multi-threaded ingestion** - Multiple worker threads per node
 - [ ] **Full cluster distribution** - Automatic workload distribution across all Harper nodes
 - [ ] **Dynamic rebalancing** - Handle node additions/removals without manual intervention
@@ -405,6 +436,7 @@ Multi-threaded, multi-instance Harper cluster support:
 - [ ] **Thread-level checkpointing** - Fine-grained recovery per worker thread
 
 **Benefits:**
+
 - Linear scaling across cluster nodes
 - Better resource utilization per node
 - Automatic failover and rebalancing

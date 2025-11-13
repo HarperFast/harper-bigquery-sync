@@ -12,21 +12,21 @@
  * formatColumnList(['id', 'name', 'timestamp']) // returns "id, name, timestamp"
  */
 export function formatColumnList(columns) {
-  if (!Array.isArray(columns)) {
-    throw new Error('columns must be an array');
-  }
+	if (!Array.isArray(columns)) {
+		throw new Error('columns must be an array');
+	}
 
-  if (columns.length === 0) {
-    throw new Error('columns array cannot be empty');
-  }
+	if (columns.length === 0) {
+		throw new Error('columns array cannot be empty');
+	}
 
-  // Special case: ['*'] means SELECT *
-  if (columns.length === 1 && columns[0] === '*') {
-    return '*';
-  }
+	// Special case: ['*'] means SELECT *
+	if (columns.length === 1 && columns[0] === '*') {
+		return '*';
+	}
 
-  // Format as comma-separated list with proper spacing
-  return columns.join(', ');
+	// Format as comma-separated list with proper spacing
+	return columns.join(', ');
 }
 
 /**
@@ -40,17 +40,17 @@ export function formatColumnList(columns) {
  * @returns {string} SQL query string
  */
 export function buildPullPartitionQuery({ dataset, table, timestampColumn, columns }) {
-  if (!dataset || !table || !timestampColumn) {
-    throw new Error('dataset, table, and timestampColumn are required');
-  }
+	if (!dataset || !table || !timestampColumn) {
+		throw new Error('dataset, table, and timestampColumn are required');
+	}
 
-  if (!columns || !Array.isArray(columns)) {
-    throw new Error('columns must be a non-empty array');
-  }
+	if (!columns || !Array.isArray(columns)) {
+		throw new Error('columns must be a non-empty array');
+	}
 
-  const columnList = formatColumnList(columns);
+	const columnList = formatColumnList(columns);
 
-  return `
+	return `
     SELECT ${columnList}
     FROM \`${dataset}.${table}\`
     WHERE
@@ -75,11 +75,11 @@ export function buildPullPartitionQuery({ dataset, table, timestampColumn, colum
  * @returns {string} SQL query string
  */
 export function buildCountPartitionQuery({ dataset, table, timestampColumn }) {
-  if (!dataset || !table || !timestampColumn) {
-    throw new Error('dataset, table, and timestampColumn are required');
-  }
+	if (!dataset || !table || !timestampColumn) {
+		throw new Error('dataset, table, and timestampColumn are required');
+	}
 
-  return `
+	return `
     SELECT COUNT(*) as count
     FROM \`${dataset}.${table}\`
     WHERE MOD(
@@ -98,11 +98,11 @@ export function buildCountPartitionQuery({ dataset, table, timestampColumn }) {
  * @returns {string} SQL query string
  */
 export function buildVerifyRecordQuery({ dataset, table, timestampColumn }) {
-  if (!dataset || !table || !timestampColumn) {
-    throw new Error('dataset, table, and timestampColumn are required');
-  }
+	if (!dataset || !table || !timestampColumn) {
+		throw new Error('dataset, table, and timestampColumn are required');
+	}
 
-  return `
+	return `
     SELECT 1
     FROM \`${dataset}.${table}\`
     WHERE ${timestampColumn} = @timestamp
@@ -116,69 +116,69 @@ export function buildVerifyRecordQuery({ dataset, table, timestampColumn }) {
  * Encapsulates query construction logic with column selection support
  */
 export class QueryBuilder {
-  /**
-   * Creates a new QueryBuilder instance
-   * @param {Object} config - BigQuery configuration
-   * @param {string} config.dataset - BigQuery dataset name
-   * @param {string} config.table - BigQuery table name
-   * @param {string} config.timestampColumn - Name of the timestamp column
-   * @param {Array<string>} config.columns - Columns to select (defaults to ['*'])
-   */
-  constructor({ dataset, table, timestampColumn, columns = ['*'] }) {
-    if (!dataset || !table || !timestampColumn) {
-      throw new Error('dataset, table, and timestampColumn are required');
-    }
+	/**
+	 * Creates a new QueryBuilder instance
+	 * @param {Object} config - BigQuery configuration
+	 * @param {string} config.dataset - BigQuery dataset name
+	 * @param {string} config.table - BigQuery table name
+	 * @param {string} config.timestampColumn - Name of the timestamp column
+	 * @param {Array<string>} config.columns - Columns to select (defaults to ['*'])
+	 */
+	constructor({ dataset, table, timestampColumn, columns = ['*'] }) {
+		if (!dataset || !table || !timestampColumn) {
+			throw new Error('dataset, table, and timestampColumn are required');
+		}
 
-    this.dataset = dataset;
-    this.table = table;
-    this.timestampColumn = timestampColumn;
-    this.columns = columns;
-  }
+		this.dataset = dataset;
+		this.table = table;
+		this.timestampColumn = timestampColumn;
+		this.columns = columns;
+	}
 
-  /**
-   * Builds query to pull a partition of data
-   * @returns {string} SQL query string
-   */
-  buildPullPartitionQuery() {
-    return buildPullPartitionQuery({
-      dataset: this.dataset,
-      table: this.table,
-      timestampColumn: this.timestampColumn,
-      columns: this.columns
-    });
-  }
+	/**
+	 * Builds query to pull a partition of data
+	 * @returns {string} SQL query string
+	 */
+	buildPullPartitionQuery() {
+		return buildPullPartitionQuery({
+			dataset: this.dataset,
+			table: this.table,
+			timestampColumn: this.timestampColumn,
+			columns: this.columns,
+		});
+	}
 
-  /**
-   * Builds query to count records in a partition
-   * @returns {string} SQL query string
-   */
-  buildCountPartitionQuery() {
-    return buildCountPartitionQuery({
-      dataset: this.dataset,
-      table: this.table,
-      timestampColumn: this.timestampColumn
-    });
-  }
+	/**
+	 * Builds query to count records in a partition
+	 * @returns {string} SQL query string
+	 */
+	buildCountPartitionQuery() {
+		return buildCountPartitionQuery({
+			dataset: this.dataset,
+			table: this.table,
+			timestampColumn: this.timestampColumn,
+		});
+	}
 
-  /**
-   * Builds query to verify a specific record exists
-   * @returns {string} SQL query string
-   */
-  buildVerifyRecordQuery() {
-    return buildVerifyRecordQuery({
-      dataset: this.dataset,
-      table: this.table,
-      timestampColumn: this.timestampColumn
-    });
-  }
+	/**
+	 * Builds query to verify a specific record exists
+	 * @returns {string} SQL query string
+	 */
+	buildVerifyRecordQuery() {
+		return buildVerifyRecordQuery({
+			dataset: this.dataset,
+			table: this.table,
+			timestampColumn: this.timestampColumn,
+		});
+	}
 
-  /**
-   * Gets the formatted column list for logging/debugging
-   * @returns {string} Formatted column list
-   */
-  getColumnList() {
-    return formatColumnList(this.columns);
-  }
+	/**
+	 * Gets the formatted column list for logging/debugging
+	 * @returns {string} Formatted column list
+	 */
+	getColumnList() {
+		return formatColumnList(this.columns);
+	}
 }
 
 export default QueryBuilder;

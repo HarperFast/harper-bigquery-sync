@@ -26,7 +26,7 @@ bigquery:
   # Shared credentials and project settings
   projectId: your-gcp-project-id
   credentials: service-account-key.json
-  location: US  # BigQuery dataset location (US, EU, or specific region)
+  location: US # BigQuery dataset location (US, EU, or specific region)
 
   # Define multiple tables to sync
   tables:
@@ -36,7 +36,7 @@ bigquery:
       table: vessel_positions
       timestampColumn: timestamp
       columns: [timestamp, mmsi, vessel_name, latitude, longitude, speed_knots, heading, course]
-      targetTable: VesselPositions  # Harper table name
+      targetTable: VesselPositions # Harper table name
       sync:
         initialBatchSize: 10000
         catchupBatchSize: 1000
@@ -46,9 +46,9 @@ bigquery:
     - id: port_events
       dataset: maritime_tracking
       table: port_events
-      timestampColumn: event_time  # Different timestamp column name
+      timestampColumn: event_time # Different timestamp column name
       columns: [event_time, port_id, vessel_mmsi, event_type, status, cargo_info]
-      targetTable: PortEvents  # Different Harper table
+      targetTable: PortEvents # Different Harper table
       sync:
         initialBatchSize: 5000
         catchupBatchSize: 500
@@ -59,7 +59,7 @@ bigquery:
       dataset: maritime_tracking
       table: vessel_metadata
       timestampColumn: last_updated
-      columns: ['*']  # Fetch all columns
+      columns: ['*'] # Fetch all columns
       targetTable: VesselMetadata
       sync:
         initialBatchSize: 1000
@@ -69,17 +69,17 @@ bigquery:
 # Global sync settings (apply to all tables unless overridden)
 sync:
   # Lag thresholds (seconds)
-  catchupThreshold: 3600   # 1 hour
-  steadyThreshold: 300     # 5 minutes
+  catchupThreshold: 3600 # 1 hour
+  steadyThreshold: 300 # 5 minutes
 
   # Polling interval in steady state (milliseconds)
-  pollInterval: 30000      # 30 seconds
+  pollInterval: 30000 # 30 seconds
 
 validation:
   enabled: true
-  interval: 300            # Run every 5 minutes
+  interval: 300 # Run every 5 minutes
 
 retry:
   maxAttempts: 5
   backoffMultiplier: 2
-  initialDelay: 1000       # milliseconds
+  initialDelay: 1000 # milliseconds

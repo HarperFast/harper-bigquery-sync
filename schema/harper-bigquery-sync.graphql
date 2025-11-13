@@ -1,45 +1,44 @@
 # File: bigquery-ingestor.graphql
 # GraphQL schema definitions for tables
 
-
 # Example tables - to be replaced with dynamic tables later
 type VesselPositions @table {
-  id: ID @primaryKey
-  # All BigQuery fields stored directly at top level
+	id: ID @primaryKey
+	# All BigQuery fields stored directly at top level
 }
 
 type PortEvents @table {
-  id: ID @primaryKey
-  # All BigQuery fields stored directly at top level
+	id: ID @primaryKey
+	# All BigQuery fields stored directly at top level
 }
 
 type VesselMetadata @table {
-  id: ID @primaryKey
-  # All BigQuery fields stored directly at top level
+	id: ID @primaryKey
+	# All BigQuery fields stored directly at top level
 }
 
 # Checkpoint table for ingestion
 # Supports multi-table sync with composite checkpoint IDs
 type SyncCheckpoint @table {
-  checkpointId: String! @primaryKey  # Format: "{tableId}_{nodeId}" for multi-table, "{nodeId}" for single table
-  tableId: String!                   # Table identifier (e.g., "vessel_positions", "port_events")
-  nodeId: Int!                        # Node ID within cluster
-  lastTimestamp: String!              # ISO 8601 string - matches BigQuery TIMESTAMP() parameter format
-  recordsIngested: Long!
-  lastSyncTime: String!               # ISO 8601 string
-  phase: String!
-  batchSize: Int!
+	checkpointId: String! @primaryKey # Format: "{tableId}_{nodeId}" for multi-table, "{nodeId}" for single table
+	tableId: String! # Table identifier (e.g., "vessel_positions", "port_events")
+	nodeId: Int! # Node ID within cluster
+	lastTimestamp: String! # ISO 8601 string - matches BigQuery TIMESTAMP() parameter format
+	recordsIngested: Long!
+	lastSyncTime: String! # ISO 8601 string
+	phase: String!
+	batchSize: Int!
 }
 
 # Audit table for ingestion
 type SyncAudit @table {
-  id: ID! @primaryKey
-  timestamp: Date! @indexed @createdTime
-  nodeId: Int
-  bigQueryCount: Long
-  harperCount: Long
-  delta: Long
-  status: String!
-  reason: String
-  recordSample: String
+	id: ID! @primaryKey
+	timestamp: Date! @indexed @createdTime
+	nodeId: Int
+	bigQueryCount: Long
+	harperCount: Long
+	delta: Long
+	status: String!
+	reason: String
+	recordSample: String
 }

@@ -10,10 +10,10 @@
  * @private
  */
 function isBigQueryTimestamp(value) {
-  if (!value || typeof value !== 'object') return false;
+	if (!value || typeof value !== 'object') return false;
 
-  const constructorName = value.constructor?.name;
-  return ['BigQueryTimestamp', 'BigQueryDatetime', 'BigQueryDate'].includes(constructorName);
+	const constructorName = value.constructor?.name;
+	return ['BigQueryTimestamp', 'BigQueryDatetime', 'BigQueryDate'].includes(constructorName);
 }
 
 /**
@@ -23,7 +23,7 @@ function isBigQueryTimestamp(value) {
  * @private
  */
 function looksLikeISODate(str) {
-  return typeof str === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(str);
+	return typeof str === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(str);
 }
 
 /**
@@ -32,19 +32,19 @@ function looksLikeISODate(str) {
  * @returns {Date|*} Date object if conversion succeeds, original value otherwise
  */
 export function convertBigQueryTimestamp(value) {
-  // Try .value property (contains ISO string)
-  if (value.value) {
-    return new Date(value.value);
-  }
+	// Try .value property (contains ISO string)
+	if (value.value) {
+		return new Date(value.value);
+	}
 
-  // Try .toJSON() method
-  if (typeof value.toJSON === 'function') {
-    const jsonValue = value.toJSON();
-    return new Date(jsonValue);
-  }
+	// Try .toJSON() method
+	if (typeof value.toJSON === 'function') {
+		const jsonValue = value.toJSON();
+		return new Date(jsonValue);
+	}
 
-  // Unable to convert
-  return value;
+	// Unable to convert
+	return value;
 }
 
 /**
@@ -53,10 +53,10 @@ export function convertBigQueryTimestamp(value) {
  * @returns {number|string} Number if within safe integer range, String otherwise
  */
 export function convertBigInt(value) {
-  if (value <= Number.MAX_SAFE_INTEGER && value >= Number.MIN_SAFE_INTEGER) {
-    return Number(value);
-  }
-  return value.toString();
+	if (value <= Number.MAX_SAFE_INTEGER && value >= Number.MIN_SAFE_INTEGER) {
+		return Number(value);
+	}
+	return value.toString();
 }
 
 /**
@@ -65,46 +65,46 @@ export function convertBigInt(value) {
  * @returns {*} Converted value
  */
 export function convertValue(value) {
-  // Handle null/undefined
-  if (value === null || value === undefined) {
-    return value;
-  }
+	// Handle null/undefined
+	if (value === null || value === undefined) {
+		return value;
+	}
 
-  // Handle BigInt
-  if (typeof value === 'bigint') {
-    return convertBigInt(value);
-  }
+	// Handle BigInt
+	if (typeof value === 'bigint') {
+		return convertBigInt(value);
+	}
 
-  // Handle objects
-  if (typeof value === 'object') {
-    // BigQuery timestamp types
-    if (isBigQueryTimestamp(value)) {
-      return convertBigQueryTimestamp(value);
-    }
+	// Handle objects
+	if (typeof value === 'object') {
+		// BigQuery timestamp types
+		if (isBigQueryTimestamp(value)) {
+			return convertBigQueryTimestamp(value);
+		}
 
-    // Already a Date object
-    if (value instanceof Date) {
-      return value;
-    }
+		// Already a Date object
+		if (value instanceof Date) {
+			return value;
+		}
 
-    // Object with toJSON method
-    if (typeof value.toJSON === 'function') {
-      const jsonValue = value.toJSON();
+		// Object with toJSON method
+		if (typeof value.toJSON === 'function') {
+			const jsonValue = value.toJSON();
 
-      // If it looks like an ISO date, convert to Date
-      if (looksLikeISODate(jsonValue)) {
-        return new Date(jsonValue);
-      }
+			// If it looks like an ISO date, convert to Date
+			if (looksLikeISODate(jsonValue)) {
+				return new Date(jsonValue);
+			}
 
-      return jsonValue;
-    }
+			return jsonValue;
+		}
 
-    // Other objects - keep as-is
-    return value;
-  }
+		// Other objects - keep as-is
+		return value;
+	}
 
-  // Primitive types - keep as-is
-  return value;
+	// Primitive types - keep as-is
+	return value;
 }
 
 /**
@@ -114,17 +114,17 @@ export function convertValue(value) {
  * @returns {Object} Record with converted types
  */
 export function convertBigQueryTypes(record) {
-  if (!record || typeof record !== 'object') {
-    throw new Error('Record must be an object');
-  }
+	if (!record || typeof record !== 'object') {
+		throw new Error('Record must be an object');
+	}
 
-  const converted = {};
+	const converted = {};
 
-  for (const [key, value] of Object.entries(record)) {
-    converted[key] = convertValue(value);
-  }
+	for (const [key, value] of Object.entries(record)) {
+		converted[key] = convertValue(value);
+	}
 
-  return converted;
+	return converted;
 }
 
 /**
@@ -133,17 +133,17 @@ export function convertBigQueryTypes(record) {
  * @returns {Array<Object>} Array of converted records
  */
 export function convertBigQueryRecords(records) {
-  if (!Array.isArray(records)) {
-    throw new Error('Records must be an array');
-  }
+	if (!Array.isArray(records)) {
+		throw new Error('Records must be an array');
+	}
 
-  return records.map(record => convertBigQueryTypes(record));
+	return records.map((record) => convertBigQueryTypes(record));
 }
 
 export default {
-  convertBigQueryTypes,
-  convertBigQueryRecords,
-  convertValue,
-  convertBigInt,
-  convertBigQueryTimestamp
+	convertBigQueryTypes,
+	convertBigQueryRecords,
+	convertValue,
+	convertBigInt,
+	convertBigQueryTimestamp,
 };

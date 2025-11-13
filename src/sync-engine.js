@@ -2,468 +2,487 @@
 // File: sync-engine.js
 // Core synchronization engine with modulo-based partitioning
 
-/* global config, harperCluster, tables */
+/* global tables */
 
 import { BigQueryClient } from './bigquery-client.js';
-import { globals } from './globals.js';
+import { globals as _globals } from './globals.js';
 import { convertBigQueryTypes } from './type-converter.js';
 
 export class SyncEngine {
-  constructor(config) {
-    logger.info('[SyncEngine] Constructor called - initializing sync engine');
+	constructor(config) {
+		logger.info('[SyncEngine] Constructor called - initializing sync engine');
 
-    logger.info("Hostname: " + server.hostname);
-    logger.info("Worker Id: " + server.workerIndex);
-    logger.info("Nodes: " + server.nodes);
+		logger.info('Hostname: ' + server.hostname);
+		logger.info('Worker Id: ' + server.workerIndex);
+		logger.info('Nodes: ' + server.nodes);
 
-    this.initialized = false;
-    this.config = config;
+		this.initialized = false;
+		this.config = config;
 
-    // Multi-table support: tableId and targetTable
-    this.tableId = config.tableId || 'default';
-    this.targetTable = config.targetTable || 'VesselPositions';
-    this.timestampColumn = config.bigquery?.timestampColumn || config.timestampColumn || 'timestamp';
+		// Multi-table support: tableId and targetTable
+		this.tableId = config.tableId || 'default';
+		this.targetTable = config.targetTable || 'VesselPositions';
+		this.timestampColumn = config.bigquery?.timestampColumn || config.timestampColumn || 'timestamp';
 
-    // Composite checkpoint ID: {tableId}_{nodeId}
-    // Will be set after cluster discovery determines nodeId
-    this.checkpointId = null;
+		// Composite checkpoint ID: {tableId}_{nodeId}
+		// Will be set after cluster discovery determines nodeId
+		this.checkpointId = null;
 
-    this.client = new BigQueryClient(this.config);
-    this.running = false;
-    this.nodeId = null;
-    this.clusterSize = null;
-    this.currentPhase = 'initial';
-    this.lastCheckpoint = null;
-    this.pollTimer = null;
+		this.client = new BigQueryClient(this.config);
+		this.running = false;
+		this.nodeId = null;
+		this.clusterSize = null;
+		this.currentPhase = 'initial';
+		this.lastCheckpoint = null;
+		this.pollTimer = null;
 
-    logger.info(`[SyncEngine] Multi-table config - tableId: ${this.tableId}, targetTable: ${this.targetTable}`);
-    logger.debug('[SyncEngine] Constructor complete - initial state set');
-  }
-  
-  async initialize() {
-    if (! this.initialized) {
-      logger.info('[SyncEngine.initialize] Starting initialization process');
+		logger.info(`[SyncEngine] Multi-table config - tableId: ${this.tableId}, targetTable: ${this.targetTable}`);
+		logger.debug('[SyncEngine] Constructor complete - initial state set');
+	}
 
-      // Discover cluster topology using Harper's native clustering
-      logger.debug('[SyncEngine.initialize] Discovering cluster topology');
-      const clusterInfo = await this.discoverCluster();
-      logger.debug(clusterInfo);
-      this.nodeId = clusterInfo.nodeId;
-      this.clusterSize = clusterInfo.clusterSize;
+	async initialize() {
+		if (!this.initialized) {
+			logger.info('[SyncEngine.initialize] Starting initialization process');
 
-      // Set composite checkpoint ID: {tableId}_{nodeId}
-      this.checkpointId = `${this.tableId}_${this.nodeId}`;
+			// Discover cluster topology using Harper's native clustering
+			logger.debug('[SyncEngine.initialize] Discovering cluster topology');
+			const clusterInfo = await this.discoverCluster();
+			logger.debug(clusterInfo);
+			this.nodeId = clusterInfo.nodeId;
+			this.clusterSize = clusterInfo.clusterSize;
 
-      logger.info(`[SyncEngine.initialize] Node initialized: ID=${this.nodeId}, ClusterSize=${this.clusterSize}, CheckpointID=${this.checkpointId}`);
+			// Set composite checkpoint ID: {tableId}_{nodeId}
+			this.checkpointId = `${this.tableId}_${this.nodeId}`;
 
-      // Load last checkpoint
-      logger.debug('[SyncEngine.initialize] Loading checkpoint from database');
-      this.lastCheckpoint = await this.loadCheckpoint();
+			logger.info(
+				`[SyncEngine.initialize] Node initialized: ID=${this.nodeId}, ClusterSize=${this.clusterSize}, CheckpointID=${this.checkpointId}`
+			);
 
-      if (this.lastCheckpoint) {
-        this.currentPhase = this.lastCheckpoint.phase || 'initial';
-        logger.info(`[SyncEngine.initialize] Resuming from checkpoint: ${this.lastCheckpoint.lastTimestamp}, phase: ${this.currentPhase}`);
-      } else {
-        logger.info('[SyncEngine.initialize] No checkpoint found - starting fresh');
-        // First run - start from beginning or configurable start time
-        // Store as ISO string - matches BigQuery TIMESTAMP() parameter format
-        const startTimestampString = this.config.sync.startTimestamp || '1970-01-01T00:00:00Z';
+			// Load last checkpoint
+			logger.debug('[SyncEngine.initialize] Loading checkpoint from database');
+			this.lastCheckpoint = await this.loadCheckpoint();
 
-        // Validate it's parseable
-        const testDate = new Date(startTimestampString);
-        if (Number.isNaN(testDate.getTime())) {
-          throw new Error(`Invalid startTimestamp in config: ${startTimestampString}`);
-        }
+			if (this.lastCheckpoint) {
+				this.currentPhase = this.lastCheckpoint.phase || 'initial';
+				logger.info(
+					`[SyncEngine.initialize] Resuming from checkpoint: ${this.lastCheckpoint.lastTimestamp}, phase: ${this.currentPhase}`
+				);
+			} else {
+				logger.info('[SyncEngine.initialize] No checkpoint found - starting fresh');
+				// First run - start from beginning or configurable start time
+				// Store as ISO string - matches BigQuery TIMESTAMP() parameter format
+				const startTimestampString = this.config.sync.startTimestamp || '1970-01-01T00:00:00Z';
 
-        this.lastCheckpoint = {
-          checkpointId: this.checkpointId,
-          tableId: this.tableId,
-          nodeId: this.nodeId,
-          lastTimestamp: startTimestampString,
-          recordsIngested: 0,
-          phase: 'initial'
-        };
-        logger.debug(`[SyncEngine.initialize] Created new checkpoint starting at ${this.lastCheckpoint.lastTimestamp}`);
-      }
-      logger.info('[SyncEngine.initialize] Initialization complete');
-      this.initialized = true;
-    } else {
-      logger.info('[SyncEngine.initialize] Object already initialized');
-    }
-  }
-  
-  async discoverCluster() {
-    logger.debug('[SyncEngine.discoverCluster] Querying Harper cluster API');
-    const currentNodeId = [server.hostname, server.workerIndex].join('-');
-    logger.info(`[SyncEngine.discoverCluster] Current node ID: ${currentNodeId}`);
+				// Validate it's parseable
+				const testDate = new Date(startTimestampString);
+				if (Number.isNaN(testDate.getTime())) {
+					throw new Error(`Invalid startTimestamp in config: ${startTimestampString}`);
+				}
 
-    // Get cluster nodes from server.nodes if available
-    let nodes;
-    if (server.nodes && Array.isArray(server.nodes) && server.nodes.length > 0) {
-      nodes = server.nodes.map(node => `${node.hostname}-${node.workerIndex || 0}`);
-      logger.info(`[SyncEngine.discoverCluster] Found ${nodes.length} nodes from server.nodes`);
-    } else {
-      logger.info('[SyncEngine.discoverCluster] No cluster nodes found, running in single-node mode');
-      nodes = [currentNodeId];
-    }
+				this.lastCheckpoint = {
+					checkpointId: this.checkpointId,
+					tableId: this.tableId,
+					nodeId: this.nodeId,
+					lastTimestamp: startTimestampString,
+					recordsIngested: 0,
+					phase: 'initial',
+				};
+				logger.debug(`[SyncEngine.initialize] Created new checkpoint starting at ${this.lastCheckpoint.lastTimestamp}`);
+			}
+			logger.info('[SyncEngine.initialize] Initialization complete');
+			this.initialized = true;
+		} else {
+			logger.info('[SyncEngine.initialize] Object already initialized');
+		}
+	}
 
-    // Sort deterministically (lexicographic)
-    nodes.sort();
-    logger.info(`[SyncEngine.discoverCluster] Sorted nodes: ${nodes.join(', ')}`);
+	async discoverCluster() {
+		logger.debug('[SyncEngine.discoverCluster] Querying Harper cluster API');
+		const currentNodeId = [server.hostname, server.workerIndex].join('-');
+		logger.info(`[SyncEngine.discoverCluster] Current node ID: ${currentNodeId}`);
 
-    // Find our position
-    const nodeIndex = nodes.findIndex(n => n === currentNodeId);
+		// Get cluster nodes from server.nodes if available
+		let nodes;
+		if (server.nodes && Array.isArray(server.nodes) && server.nodes.length > 0) {
+			nodes = server.nodes.map((node) => `${node.hostname}-${node.workerIndex || 0}`);
+			logger.info(`[SyncEngine.discoverCluster] Found ${nodes.length} nodes from server.nodes`);
+		} else {
+			logger.info('[SyncEngine.discoverCluster] No cluster nodes found, running in single-node mode');
+			nodes = [currentNodeId];
+		}
 
-    if (nodeIndex === -1) {
-      logger.error(`[SyncEngine.discoverCluster] Current node '${currentNodeId}' not found in cluster nodes: ${nodes.join(', ')}`);
-      throw new Error(`Current node ${currentNodeId} not found in cluster`);
-    }
+		// Sort deterministically (lexicographic)
+		nodes.sort();
+		logger.info(`[SyncEngine.discoverCluster] Sorted nodes: ${nodes.join(', ')}`);
 
-    logger.info(`[SyncEngine.discoverCluster] Node position determined: index=${nodeIndex}, clusterSize=${nodes.length}`);
-    return {
-      nodeId: nodeIndex,
-      clusterSize: nodes.length,
-      nodes: nodes
-    };
-  }
-  
-  async loadCheckpoint() {
-    logger.debug(`[SyncEngine.loadCheckpoint] Attempting to load checkpoint for checkpointId=${this.checkpointId}`);
-    try {
-      const checkpoint = await tables.SyncCheckpoint.get(this.checkpointId);
-      logger.debug(`[SyncEngine.loadCheckpoint] Checkpoint found: ${JSON.stringify(checkpoint)}`);
+		// Find our position
+		const nodeIndex = nodes.findIndex((n) => n === currentNodeId);
 
-      // Validate that lastTimestamp is a valid ISO string
-      if (checkpoint && checkpoint.lastTimestamp) {
-        const testDate = new Date(checkpoint.lastTimestamp);
-        if (Number.isNaN(testDate.getTime())) {
-          logger.error(`[SyncEngine.loadCheckpoint] Checkpoint contains invalid timestamp: ${checkpoint.lastTimestamp} - deleting corrupted checkpoint`);
-          await tables.SyncCheckpoint.delete(this.checkpointId);
-          return null;
-        }
-      }
+		if (nodeIndex === -1) {
+			logger.error(
+				`[SyncEngine.discoverCluster] Current node '${currentNodeId}' not found in cluster nodes: ${nodes.join(', ')}`
+			);
+			throw new Error(`Current node ${currentNodeId} not found in cluster`);
+		}
 
-      return checkpoint;
-    } catch (error) {
-      // If checkpoint not found, return null; otherwise log and rethrow so callers can handle it.
-      if (error && (error.code === 'NOT_FOUND' || /not\s*found/i.test(error.message || ''))) {
-        logger.debug('[SyncEngine.loadCheckpoint] No checkpoint found in database (first run)');
-        return null;
-      }
-      logger.error(`[SyncEngine.loadCheckpoint] Error loading checkpoint: ${error.message}`, error);
-      throw error;
-    }
-  }
-  
-  async start() {
-    logger.info('[SyncEngine.start] Start method called');
-    if (this.running) {
-      logger.warn('[SyncEngine.start] Sync already running - ignoring duplicate start request');
-      return;
-    }
-    
-    this.running = true;
-    logger.info('[SyncEngine.start] Starting sync loop');
-    this.schedulePoll();
-    logger.debug('[SyncEngine.start] First poll scheduled');
-  }
-  
-  async stop() {
-    logger.info('[SyncEngine.stop] Stop method called');
-    this.running = false;
-    if (this.pollTimer) {
-      logger.debug('[SyncEngine.stop] Clearing poll timer');
-      clearTimeout(this.pollTimer);
-      this.pollTimer = null;
-    }
-    logger.info('[SyncEngine.stop] Sync stopped');
-  }
-  
-  schedulePoll() {
-    if (!this.running) {
-      logger.debug('[SyncEngine.schedulePoll] Not running - skipping poll schedule');
-      return;
-    }
-    
-    const interval = this.calculatePollInterval();
-    logger.debug(`[SyncEngine.schedulePoll] Scheduling next poll in ${interval}ms (phase: ${this.currentPhase})`);
-    this.pollTimer = setTimeout(() => this.runSyncCycle(), interval);
-  }
-  
-  calculatePollInterval() {
-    logger.debug(`[SyncEngine.calculatePollInterval] Calculating interval for phase: ${this.currentPhase}`);
-    // Adaptive polling based on phase
-    let interval;
-    switch(this.currentPhase) {
-      case 'initial':
-      interval = 1000; // 1 second - aggressive catch-up
-      break;
-      case 'catchup':
-      interval = 5000; // 5 seconds
-      break;
-      case 'steady':
-      interval = this.config.sync.pollInterval || 30000; // 30 seconds
-      break;
-      default:
-      interval = 10000;
-    }
-    logger.debug(`[SyncEngine.calculatePollInterval] Interval calculated: ${interval}ms`);
-    return interval;
-  }
-  
-  async runSyncCycle() {
-    logger.info(`[SyncEngine.runSyncCycle] Starting sync cycle for node ${this.nodeId}, phase: ${this.currentPhase}`);
-    try {
-      const batchSize = this.calculateBatchSize();
-      logger.debug(`[SyncEngine.runSyncCycle] Batch size: ${batchSize}`);
-      
-      // Pull records for this node's partition
-      logger.debug(`[SyncEngine.runSyncCycle] Pulling partition data from BigQuery - nodeId: ${this.nodeId}, clusterSize: ${this.clusterSize}, lastTimestamp: ${this.lastCheckpoint.lastTimestamp}`);
-      const records = await this.client.pullPartition({
-        nodeId: this.nodeId,
-        clusterSize: this.clusterSize,
-        lastTimestamp: this.lastCheckpoint.lastTimestamp,
-        batchSize
-      });
-      logger.info(`[SyncEngine.runSyncCycle] Received ${records.length} records from BigQuery`);
-      
-      if (records.length === 0) {
-        logger.info(`[SyncEngine.runSyncCycle] No new records found - transitioning to steady state`);
-        this.currentPhase = 'steady';
-      } else {
-        
-        // Write to Harper
-        logger.debug(`[SyncEngine.runSyncCycle] Ingesting ${records.length} records into Harper`);
-        await this.ingestRecords(records);
-        logger.debug('[SyncEngine.runSyncCycle] Ingest complete');
-        
-        // Update checkpoint
-        logger.debug('[SyncEngine.runSyncCycle] Updating checkpoint');
-        await this.updateCheckpoint(records);
-        logger.debug('[SyncEngine.runSyncCycle] Checkpoint updated');
-        
-        // Update phase based on lag
-        logger.debug('[SyncEngine.runSyncCycle] Updating phase based on lag');
-        await this.updatePhase();
-        logger.debug(`[SyncEngine.runSyncCycle] Phase after update: ${this.currentPhase}`);
-      }
-      
-      logger.info(`[SyncEngine.runSyncCycle] Sync cycle complete`);
-    } catch (error) {
-      logger.error(`[SyncEngine.runSyncCycle] Sync cycle error: ${error.message}`, error);
-      // Continue despite errors - don't crash the component
-    } finally {
-      // Schedule next poll
-      logger.debug('[SyncEngine.runSyncCycle] Scheduling next poll');
-      this.schedulePoll();
-    }
-  }
-  
-  calculateBatchSize() {
-    logger.debug(`[SyncEngine.calculateBatchSize] Calculating batch size for phase: ${this.currentPhase}`);
-    let batchSize;
-    switch(this.currentPhase) {
-      case 'initial':
-      batchSize = this.config.sync.initialBatchSize || 10000;
-      break;
-      case 'catchup':
-      batchSize = this.config.sync.catchupBatchSize || 1000;
-      break;
-      case 'steady':
-      batchSize = this.config.sync.steadyBatchSize || 500;
-      break;
-      default:
-      batchSize = 1000;
-    }
-    logger.debug(`[SyncEngine.calculateBatchSize] Batch size: ${batchSize}`);
-    return batchSize;
-  }
-  
+		logger.info(
+			`[SyncEngine.discoverCluster] Node position determined: index=${nodeIndex}, clusterSize=${nodes.length}`
+		);
+		return {
+			nodeId: nodeIndex,
+			clusterSize: nodes.length,
+			nodes: nodes,
+		};
+	}
 
-  async ingestRecords(records) {
+	async loadCheckpoint() {
+		logger.debug(`[SyncEngine.loadCheckpoint] Attempting to load checkpoint for checkpointId=${this.checkpointId}`);
+		try {
+			const checkpoint = await tables.SyncCheckpoint.get(this.checkpointId);
+			logger.debug(`[SyncEngine.loadCheckpoint] Checkpoint found: ${JSON.stringify(checkpoint)}`);
 
-    logger.trace(`[SyncEngine.ingestRecords] Processing records: ${JSON.stringify(records)} records for ingestion`);
-    logger.debug(`[SyncEngine.ingestRecords] Processing ${records.length} records for ingestion`);
-    const validRecords = [];
-    const timestampColumn = this.config.bigquery.timestampColumn;
+			// Validate that lastTimestamp is a valid ISO string
+			if (checkpoint && checkpoint.lastTimestamp) {
+				const testDate = new Date(checkpoint.lastTimestamp);
+				if (Number.isNaN(testDate.getTime())) {
+					logger.error(
+						`[SyncEngine.loadCheckpoint] Checkpoint contains invalid timestamp: ${checkpoint.lastTimestamp} - deleting corrupted checkpoint`
+					);
+					await tables.SyncCheckpoint.delete(this.checkpointId);
+					return null;
+				}
+			}
 
-    for (const record of records) {
-      try {
-        // Convert BigQuery types to JavaScript primitives using type-converter utility
-        const convertedRecord = convertBigQueryTypes(record);
-        logger.trace(`[SyncEngine.ingestRecords] Converted record: ${JSON.stringify(convertedRecord)}`);
+			return checkpoint;
+		} catch (error) {
+			// If checkpoint not found, return null; otherwise log and rethrow so callers can handle it.
+			if (error && (error.code === 'NOT_FOUND' || /not\s*found/i.test(error.message || ''))) {
+				logger.debug('[SyncEngine.loadCheckpoint] No checkpoint found in database (first run)');
+				return null;
+			}
+			logger.error(`[SyncEngine.loadCheckpoint] Error loading checkpoint: ${error.message}`, error);
+			throw error;
+		}
+	}
 
-        // Validate timestamp exists
-        if (!convertedRecord[timestampColumn]) {
-          logger.warn(`[SyncEngine.ingestRecords] Missing timestamp column '${timestampColumn}', skipping record: ${JSON.stringify(convertedRecord).substring(0, 100)}`);
-          await this.logSkippedRecord(convertedRecord, `missing_${timestampColumn}`);
-          continue;
-        }
+	async start() {
+		logger.info('[SyncEngine.start] Start method called');
+		if (this.running) {
+			logger.warn('[SyncEngine.start] Sync already running - ignoring duplicate start request');
+			return;
+		}
 
-        // Remove 'id' field from BigQuery data if it exists (not needed since transaction_date is the primary key)
-        const { id: _unusedId, ...cleanedRecord } = convertedRecord;
+		this.running = true;
+		logger.info('[SyncEngine.start] Starting sync loop');
+		this.schedulePoll();
+		logger.debug('[SyncEngine.start] First poll scheduled');
+	}
 
-        // Store BigQuery record as-is with metadata
-        // transaction_date is the primary key (defined in schema)
-        const mappedRecord = {
-          ...cleanedRecord,  // All BigQuery fields at top level (timestamps converted to Date objects)
-          _syncedAt: new Date()  // Add sync timestamp as Date object
-        };
+	async stop() {
+		logger.info('[SyncEngine.stop] Stop method called');
+		this.running = false;
+		if (this.pollTimer) {
+			logger.debug('[SyncEngine.stop] Clearing poll timer');
+			clearTimeout(this.pollTimer);
+			this.pollTimer = null;
+		}
+		logger.info('[SyncEngine.stop] Sync stopped');
+	}
 
-        validRecords.push(mappedRecord);
-      } catch (error) {
-        logger.error(`[SyncEngine.ingestRecords] Error processing record: ${error.message}`, error);
-        logger.error(`[SyncEngine.ingestRecords] Error stack: ${error.stack}`);
-        await this.logSkippedRecord(record, `processing_error: ${error.message}`);
-      }
-    }
+	schedulePoll() {
+		if (!this.running) {
+			logger.debug('[SyncEngine.schedulePoll] Not running - skipping poll schedule');
+			return;
+		}
 
-    logger.info(`[SyncEngine.ingestRecords] Validated ${validRecords.length}/${records.length} records`);
+		const interval = this.calculatePollInterval();
+		logger.debug(`[SyncEngine.schedulePoll] Scheduling next poll in ${interval}ms (phase: ${this.currentPhase})`);
+		this.pollTimer = setTimeout(() => this.runSyncCycle(), interval);
+	}
 
-    // Batch write to Harper
-    if (validRecords.length > 0) {
-      logger.info(`[SyncEngine.ingestRecords] Writing ${validRecords.length} records to Harper table: ${this.targetTable}`);
+	calculatePollInterval() {
+		logger.debug(`[SyncEngine.calculatePollInterval] Calculating interval for phase: ${this.currentPhase}`);
+		// Adaptive polling based on phase
+		let interval;
+		switch (this.currentPhase) {
+			case 'initial':
+				interval = 1000; // 1 second - aggressive catch-up
+				break;
+			case 'catchup':
+				interval = 5000; // 5 seconds
+				break;
+			case 'steady':
+				interval = this.config.sync.pollInterval || 30000; // 30 seconds
+				break;
+			default:
+				interval = 10000;
+		}
+		logger.debug(`[SyncEngine.calculatePollInterval] Interval calculated: ${interval}ms`);
+		return interval;
+	}
 
-      let lastResult;
-      transaction((txn) => {
-        try {
-          // Dynamic table access for multi-table support
-          const targetTableObj = tables[this.targetTable];
-          if (!targetTableObj) {
-            throw new Error(`Target table '${this.targetTable}' not found in schema`);
-          }
+	async runSyncCycle() {
+		logger.info(`[SyncEngine.runSyncCycle] Starting sync cycle for node ${this.nodeId}, phase: ${this.currentPhase}`);
+		try {
+			const batchSize = this.calculateBatchSize();
+			logger.debug(`[SyncEngine.runSyncCycle] Batch size: ${batchSize}`);
 
-          for (const rec of validRecords) {
-            lastResult = targetTableObj.create(rec);
-          }
-        } catch (error) {
-          logger.error(`[SyncEngine.ingestRecords] Harper create failed: ${error.message}`, error);
-          if (error.errors) {
-            error.errors.forEach(e => logger.error(`  ${e.reason} at ${e.location}: ${e.message}`));
-          }
-        }
-      });
-      logger.info(`[SyncEngine.ingestRecords] Successfully wrote ${validRecords.length} records`);
-    } else {
-      logger.warn('[SyncEngine.ingestRecords] No valid records to write');
-    }
-  }
+			// Pull records for this node's partition
+			logger.debug(
+				`[SyncEngine.runSyncCycle] Pulling partition data from BigQuery - nodeId: ${this.nodeId}, clusterSize: ${this.clusterSize}, lastTimestamp: ${this.lastCheckpoint.lastTimestamp}`
+			);
+			const records = await this.client.pullPartition({
+				nodeId: this.nodeId,
+				clusterSize: this.clusterSize,
+				lastTimestamp: this.lastCheckpoint.lastTimestamp,
+				batchSize,
+			});
+			logger.info(`[SyncEngine.runSyncCycle] Received ${records.length} records from BigQuery`);
 
-  async updateCheckpoint(records) {
-    logger.debug(`[SyncEngine.updateCheckpoint] Updating checkpoint with ${records.length} records`);
-    const lastRecord = records.at(-1);
-    const timestampColumn = this.config.bigquery.timestampColumn;
-    const lastTimestamp = lastRecord[timestampColumn];
+			if (records.length === 0) {
+				logger.info(`[SyncEngine.runSyncCycle] No new records found - transitioning to steady state`);
+				this.currentPhase = 'steady';
+			} else {
+				// Write to Harper
+				logger.debug(`[SyncEngine.runSyncCycle] Ingesting ${records.length} records into Harper`);
+				await this.ingestRecords(records);
+				logger.debug('[SyncEngine.runSyncCycle] Ingest complete');
 
-    if (!lastTimestamp) {
-      logger.error(`[SyncEngine.updateCheckpoint] Last record missing timestamp column '${timestampColumn}'`);
-      throw new Error(`Missing timestamp column in last record: ${timestampColumn}`);
-    }
+				// Update checkpoint
+				logger.debug('[SyncEngine.runSyncCycle] Updating checkpoint');
+				await this.updateCheckpoint(records);
+				logger.debug('[SyncEngine.runSyncCycle] Checkpoint updated');
 
-    // Extract ISO string for BigQuery TIMESTAMP() parameter
-    // BigQuery returns various timestamp types - extract the ISO string representation
-    let lastTimestampString;
+				// Update phase based on lag
+				logger.debug('[SyncEngine.runSyncCycle] Updating phase based on lag');
+				await this.updatePhase();
+				logger.debug(`[SyncEngine.runSyncCycle] Phase after update: ${this.currentPhase}`);
+			}
 
-    if (typeof lastTimestamp === 'string') {
-      // Already a string, use as-is
-      lastTimestampString = lastTimestamp;
-    } else if (lastTimestamp instanceof Date) {
-      // JavaScript Date object - convert to ISO
-      lastTimestampString = lastTimestamp.toISOString();
-    } else if (lastTimestamp && typeof lastTimestamp === 'object') {
-      // BigQuery timestamp object - try .value or .toJSON()
-      if (lastTimestamp.value) {
-        lastTimestampString = lastTimestamp.value;
-      } else if (typeof lastTimestamp.toJSON === 'function') {
-        lastTimestampString = lastTimestamp.toJSON();
-      } else {
-        // Last resort - try to stringify
-        lastTimestampString = String(lastTimestamp);
-      }
-    } else {
-      lastTimestampString = String(lastTimestamp);
-    }
+			logger.info(`[SyncEngine.runSyncCycle] Sync cycle complete`);
+		} catch (error) {
+			logger.error(`[SyncEngine.runSyncCycle] Sync cycle error: ${error.message}`, error);
+			// Continue despite errors - don't crash the component
+		} finally {
+			// Schedule next poll
+			logger.debug('[SyncEngine.runSyncCycle] Scheduling next poll');
+			this.schedulePoll();
+		}
+	}
 
-    // Validate it's a parseable timestamp
-    const testDate = new Date(lastTimestampString);
-    if (Number.isNaN(testDate.getTime())) {
-      logger.error(`[SyncEngine.updateCheckpoint] Invalid timestamp value: ${lastTimestamp} (type: ${typeof lastTimestamp})`);
-      throw new Error(`Invalid timestamp in last record: ${lastTimestampString}`);
-    }
+	calculateBatchSize() {
+		logger.debug(`[SyncEngine.calculateBatchSize] Calculating batch size for phase: ${this.currentPhase}`);
+		let batchSize;
+		switch (this.currentPhase) {
+			case 'initial':
+				batchSize = this.config.sync.initialBatchSize || 10000;
+				break;
+			case 'catchup':
+				batchSize = this.config.sync.catchupBatchSize || 1000;
+				break;
+			case 'steady':
+				batchSize = this.config.sync.steadyBatchSize || 500;
+				break;
+			default:
+				batchSize = 1000;
+		}
+		logger.debug(`[SyncEngine.calculateBatchSize] Batch size: ${batchSize}`);
+		return batchSize;
+	}
 
-    logger.debug(`[SyncEngine.updateCheckpoint] Last record timestamp: ${lastTimestampString}`);
+	async ingestRecords(records) {
+		logger.trace(`[SyncEngine.ingestRecords] Processing records: ${JSON.stringify(records)} records for ingestion`);
+		logger.debug(`[SyncEngine.ingestRecords] Processing ${records.length} records for ingestion`);
+		const validRecords = [];
+		const timestampColumn = this.config.bigquery.timestampColumn;
 
-    // Store ISO string - matches BigQuery TIMESTAMP() parameter format
-    this.lastCheckpoint = {
-      checkpointId: this.checkpointId,
-      tableId: this.tableId,
-      nodeId: this.nodeId,
-      lastTimestamp: lastTimestampString,
-      recordsIngested: this.lastCheckpoint.recordsIngested + records.length,
-      lastSyncTime: new Date().toISOString(),
-      phase: this.currentPhase,
-      batchSize: this.calculateBatchSize()
-    };
+		for (const record of records) {
+			try {
+				// Convert BigQuery types to JavaScript primitives using type-converter utility
+				const convertedRecord = convertBigQueryTypes(record);
+				logger.trace(`[SyncEngine.ingestRecords] Converted record: ${JSON.stringify(convertedRecord)}`);
 
-    logger.debug(`[SyncEngine.updateCheckpoint] New checkpoint: ${JSON.stringify(this.lastCheckpoint)}`);
-    await tables.SyncCheckpoint.put(this.lastCheckpoint);
-    logger.info(`[SyncEngine.updateCheckpoint] Checkpoint saved - total records ingested: ${this.lastCheckpoint.recordsIngested}`);
-  }
-  
-  async updatePhase() {
-    logger.debug('[SyncEngine.updatePhase] Calculating sync lag and updating phase');
-    // Calculate lag in seconds
-    const now = Date.now();
-    const lastTimestamp = new Date(this.lastCheckpoint.lastTimestamp).getTime();
-    const lagSeconds = (now - lastTimestamp) / 1000;
-    
-    logger.debug(`[SyncEngine.updatePhase] Current lag: ${lagSeconds.toFixed(2)} seconds`);
-    const oldPhase = this.currentPhase;
-    
-    // Update phase based on lag thresholds
-    if (lagSeconds > (this.config.sync.catchupThreshold || 3600)) {
-      this.currentPhase = 'initial';
-    } else if (lagSeconds > (this.config.sync.steadyThreshold || 300)) {
-      this.currentPhase = 'catchup';
-    } else {
-      this.currentPhase = 'steady';
-    }
-    
-    if (oldPhase !== this.currentPhase) {
-      logger.info(`[SyncEngine.updatePhase] Phase transition: ${oldPhase} -> ${this.currentPhase} (lag: ${lagSeconds.toFixed(2)}s)`);
-    } else {
-      logger.debug(`[SyncEngine.updatePhase] Phase unchanged: ${this.currentPhase}`);
-    }
-  }
-  
-  async logSkippedRecord(record, reason) {
-    logger.warn(`[SyncEngine.logSkippedRecord] Logging skipped record - reason: ${reason}`);
-    // Log to audit table for monitoring
-    const auditEntry = {
-      id: `skip-${Date.now()}-${Math.random()}`,
-      timestamp: new Date().toISOString(),
-      nodeId: this.nodeId,
-      status: 'skipped',
-      reason,
-      recordSample: JSON.stringify(record).substring(0, 500)
-    };
-    logger.debug(`[SyncEngine.logSkippedRecord] Audit entry: ${JSON.stringify(auditEntry)}`);
-    await tables.SyncAudit.put(auditEntry);
-    logger.debug('[SyncEngine.logSkippedRecord] Skipped record logged to audit table');
-  }
-  
-  async getStatus() {
-    logger.debug('[SyncEngine.getStatus] Status requested');
-    const status = {
-      nodeId: this.nodeId,
-      clusterSize: this.clusterSize,
-      running: this.running,
-      phase: this.currentPhase,
-      lastCheckpoint: this.lastCheckpoint
-    };
-    logger.debug(`[SyncEngine.getStatus] Returning status: ${JSON.stringify(status)}`);
-    return status;
-  }
+				// Validate timestamp exists
+				if (!convertedRecord[timestampColumn]) {
+					logger.warn(
+						`[SyncEngine.ingestRecords] Missing timestamp column '${timestampColumn}', skipping record: ${JSON.stringify(convertedRecord).substring(0, 100)}`
+					);
+					await this.logSkippedRecord(convertedRecord, `missing_${timestampColumn}`);
+					continue;
+				}
+
+				// Remove 'id' field from BigQuery data if it exists (not needed since transaction_date is the primary key)
+				const { id: _unusedId, ...cleanedRecord } = convertedRecord;
+
+				// Store BigQuery record as-is with metadata
+				// transaction_date is the primary key (defined in schema)
+				const mappedRecord = {
+					...cleanedRecord, // All BigQuery fields at top level (timestamps converted to Date objects)
+					_syncedAt: new Date(), // Add sync timestamp as Date object
+				};
+
+				validRecords.push(mappedRecord);
+			} catch (error) {
+				logger.error(`[SyncEngine.ingestRecords] Error processing record: ${error.message}`, error);
+				logger.error(`[SyncEngine.ingestRecords] Error stack: ${error.stack}`);
+				await this.logSkippedRecord(record, `processing_error: ${error.message}`);
+			}
+		}
+
+		logger.info(`[SyncEngine.ingestRecords] Validated ${validRecords.length}/${records.length} records`);
+
+		// Batch write to Harper
+		if (validRecords.length > 0) {
+			logger.info(
+				`[SyncEngine.ingestRecords] Writing ${validRecords.length} records to Harper table: ${this.targetTable}`
+			);
+
+			let _lastResult;
+			transaction((_txn) => {
+				try {
+					// Dynamic table access for multi-table support
+					const targetTableObj = tables[this.targetTable];
+					if (!targetTableObj) {
+						throw new Error(`Target table '${this.targetTable}' not found in schema`);
+					}
+
+					for (const rec of validRecords) {
+						_lastResult = targetTableObj.create(rec);
+					}
+				} catch (error) {
+					logger.error(`[SyncEngine.ingestRecords] Harper create failed: ${error.message}`, error);
+					if (error.errors) {
+						error.errors.forEach((e) => logger.error(`  ${e.reason} at ${e.location}: ${e.message}`));
+					}
+				}
+			});
+			logger.info(`[SyncEngine.ingestRecords] Successfully wrote ${validRecords.length} records`);
+		} else {
+			logger.warn('[SyncEngine.ingestRecords] No valid records to write');
+		}
+	}
+
+	async updateCheckpoint(records) {
+		logger.debug(`[SyncEngine.updateCheckpoint] Updating checkpoint with ${records.length} records`);
+		const lastRecord = records.at(-1);
+		const timestampColumn = this.config.bigquery.timestampColumn;
+		const lastTimestamp = lastRecord[timestampColumn];
+
+		if (!lastTimestamp) {
+			logger.error(`[SyncEngine.updateCheckpoint] Last record missing timestamp column '${timestampColumn}'`);
+			throw new Error(`Missing timestamp column in last record: ${timestampColumn}`);
+		}
+
+		// Extract ISO string for BigQuery TIMESTAMP() parameter
+		// BigQuery returns various timestamp types - extract the ISO string representation
+		let lastTimestampString;
+
+		if (typeof lastTimestamp === 'string') {
+			// Already a string, use as-is
+			lastTimestampString = lastTimestamp;
+		} else if (lastTimestamp instanceof Date) {
+			// JavaScript Date object - convert to ISO
+			lastTimestampString = lastTimestamp.toISOString();
+		} else if (lastTimestamp && typeof lastTimestamp === 'object') {
+			// BigQuery timestamp object - try .value or .toJSON()
+			if (lastTimestamp.value) {
+				lastTimestampString = lastTimestamp.value;
+			} else if (typeof lastTimestamp.toJSON === 'function') {
+				lastTimestampString = lastTimestamp.toJSON();
+			} else {
+				// Last resort - try to stringify
+				lastTimestampString = String(lastTimestamp);
+			}
+		} else {
+			lastTimestampString = String(lastTimestamp);
+		}
+
+		// Validate it's a parseable timestamp
+		const testDate = new Date(lastTimestampString);
+		if (Number.isNaN(testDate.getTime())) {
+			logger.error(
+				`[SyncEngine.updateCheckpoint] Invalid timestamp value: ${lastTimestamp} (type: ${typeof lastTimestamp})`
+			);
+			throw new Error(`Invalid timestamp in last record: ${lastTimestampString}`);
+		}
+
+		logger.debug(`[SyncEngine.updateCheckpoint] Last record timestamp: ${lastTimestampString}`);
+
+		// Store ISO string - matches BigQuery TIMESTAMP() parameter format
+		this.lastCheckpoint = {
+			checkpointId: this.checkpointId,
+			tableId: this.tableId,
+			nodeId: this.nodeId,
+			lastTimestamp: lastTimestampString,
+			recordsIngested: this.lastCheckpoint.recordsIngested + records.length,
+			lastSyncTime: new Date().toISOString(),
+			phase: this.currentPhase,
+			batchSize: this.calculateBatchSize(),
+		};
+
+		logger.debug(`[SyncEngine.updateCheckpoint] New checkpoint: ${JSON.stringify(this.lastCheckpoint)}`);
+		await tables.SyncCheckpoint.put(this.lastCheckpoint);
+		logger.info(
+			`[SyncEngine.updateCheckpoint] Checkpoint saved - total records ingested: ${this.lastCheckpoint.recordsIngested}`
+		);
+	}
+
+	async updatePhase() {
+		logger.debug('[SyncEngine.updatePhase] Calculating sync lag and updating phase');
+		// Calculate lag in seconds
+		const now = Date.now();
+		const lastTimestamp = new Date(this.lastCheckpoint.lastTimestamp).getTime();
+		const lagSeconds = (now - lastTimestamp) / 1000;
+
+		logger.debug(`[SyncEngine.updatePhase] Current lag: ${lagSeconds.toFixed(2)} seconds`);
+		const oldPhase = this.currentPhase;
+
+		// Update phase based on lag thresholds
+		if (lagSeconds > (this.config.sync.catchupThreshold || 3600)) {
+			this.currentPhase = 'initial';
+		} else if (lagSeconds > (this.config.sync.steadyThreshold || 300)) {
+			this.currentPhase = 'catchup';
+		} else {
+			this.currentPhase = 'steady';
+		}
+
+		if (oldPhase !== this.currentPhase) {
+			logger.info(
+				`[SyncEngine.updatePhase] Phase transition: ${oldPhase} -> ${this.currentPhase} (lag: ${lagSeconds.toFixed(2)}s)`
+			);
+		} else {
+			logger.debug(`[SyncEngine.updatePhase] Phase unchanged: ${this.currentPhase}`);
+		}
+	}
+
+	async logSkippedRecord(record, reason) {
+		logger.warn(`[SyncEngine.logSkippedRecord] Logging skipped record - reason: ${reason}`);
+		// Log to audit table for monitoring
+		const auditEntry = {
+			id: `skip-${Date.now()}-${Math.random()}`,
+			timestamp: new Date().toISOString(),
+			nodeId: this.nodeId,
+			status: 'skipped',
+			reason,
+			recordSample: JSON.stringify(record).substring(0, 500),
+		};
+		logger.debug(`[SyncEngine.logSkippedRecord] Audit entry: ${JSON.stringify(auditEntry)}`);
+		await tables.SyncAudit.put(auditEntry);
+		logger.debug('[SyncEngine.logSkippedRecord] Skipped record logged to audit table');
+	}
+
+	async getStatus() {
+		logger.debug('[SyncEngine.getStatus] Status requested');
+		const status = {
+			nodeId: this.nodeId,
+			clusterSize: this.clusterSize,
+			running: this.running,
+			phase: this.currentPhase,
+			lastCheckpoint: this.lastCheckpoint,
+		};
+		logger.debug(`[SyncEngine.getStatus] Returning status: ${JSON.stringify(status)}`);
+		return status;
+	}
 }
 
 // Export additional classes for use in resources.js

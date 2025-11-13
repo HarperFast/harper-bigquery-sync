@@ -24,11 +24,11 @@ Edit `config.yaml`:
 
 ```yaml
 bigquery:
-  projectId: your-gcp-project-id        # Your GCP project
-  dataset: maritime_tracking             # Plugin reads from here / Synthesizer writes to here (default)
+  projectId: your-gcp-project-id # Your GCP project
+  dataset: maritime_tracking # Plugin reads from here / Synthesizer writes to here (default)
   table: vessel_positions
   timestampColumn: timestamp
-  credentials: service-account-key.json  # Path to your service account key
+  credentials: service-account-key.json # Path to your service account key
   location: US
 
   # Optional: Column selection (NEW) - fetch only specific columns to reduce costs
@@ -50,6 +50,7 @@ synthesizer:
 ```
 
 **Key Points:**
+
 - By default, synthesizer writes to the same dataset/table as the plugin reads from
 - The `bigquery` section is shared (same project, credentials, and target)
 - The `synthesizer` section is optional - only needed to override defaults or adjust generation settings
@@ -76,12 +77,14 @@ npx maritime-data-synthesizer initialize 30
 ```
 
 This will:
+
 - Create the `maritime_tracking` dataset (if needed)
 - Create the `vessel_positions` table with proper schema
 - Load ~4.3 million historical vessel position records
 - Show progress updates every 10 batches
 
 **Expected output:**
+
 ```
 Configuration loaded from config.yaml
   Project: your-project
@@ -108,6 +111,7 @@ npx maritime-data-synthesizer start
 ```
 
 **Rolling Window Mode** (default):
+
 - Checks current data range
 - Automatically backfills if you have less than the target window (e.g., 30 days)
 - Generates new vessel positions continuously (100 every 60 seconds by default)
@@ -116,7 +120,8 @@ npx maritime-data-synthesizer start
 
 **Example scenarios:**
 
-*Fresh start (no data):*
+_Fresh start (no data):_
+
 ```
 $ npx maritime-data-synthesizer start
 Checking data range (target: 30 days)...
@@ -125,7 +130,8 @@ Loading 30 days... (takes ~30-60 min)
 Starting continuous generation...
 ```
 
-*Partial data (only 7 days):*
+_Partial data (only 7 days):_
+
 ```
 $ npx maritime-data-synthesizer start
 Checking data range (target: 30 days)...
@@ -134,7 +140,8 @@ Backfilling 23 days to reach 30-day window...
 Starting continuous generation...
 ```
 
-*Sufficient data (30+ days):*
+_Sufficient data (30+ days):_
+
 ```
 $ npx maritime-data-synthesizer start
 Checking data range (target: 30 days)...
@@ -144,6 +151,7 @@ Starting continuous generation...
 ```
 
 **Skip backfill (generation only):**
+
 ```bash
 npx maritime-data-synthesizer start --no-backfill
 ```
@@ -151,6 +159,7 @@ npx maritime-data-synthesizer start --no-backfill
 This will only generate new data going forward without checking or backfilling historical data.
 
 **Expected output:**
+
 ```
 Configuration loaded from config.yaml
   Project: your-project
@@ -180,6 +189,7 @@ npx maritime-data-synthesizer stats
 ```
 
 **Example output:**
+
 ```
 Configuration loaded from config.yaml
   Project: your-project
@@ -206,17 +216,21 @@ Data Statistics:
 ### Clear or Reset Data
 
 **Clear data (keeps schema):**
+
 ```bash
 npx maritime-data-synthesizer clear
 ```
+
 - Removes all data from table
 - Preserves table schema and structure
 - Useful for quick data refresh
 
 **Reset everything (deletes table):**
+
 ```bash
 npx maritime-data-synthesizer reset 30
 ```
+
 - Stops the service if running
 - Deletes the entire table
 - Reinitializes with 30 days of data
@@ -226,6 +240,7 @@ npx maritime-data-synthesizer reset 30
 ### For Different Data Volumes
 
 **High Volume** (1.44M records/day):
+
 ```yaml
 synthesizer:
   batchSize: 1000
@@ -233,22 +248,25 @@ synthesizer:
 ```
 
 **Low Volume** (14.4K records/day):
+
 ```yaml
 synthesizer:
   batchSize: 100
-  generationIntervalMs: 600000  # 10 minutes
+  generationIntervalMs: 600000 # 10 minutes
 ```
 
 **Test/Development** (1.44K records/day):
+
 ```yaml
 synthesizer:
   batchSize: 10
-  generationIntervalMs: 600000  # 10 minutes
+  generationIntervalMs: 600000 # 10 minutes
 ```
 
 ### For Longer/Shorter Retention
 
 **90-day retention:**
+
 ```yaml
 synthesizer:
   retentionDays: 90
@@ -256,10 +274,11 @@ synthesizer:
 ```
 
 **7-day retention (for testing):**
+
 ```yaml
 synthesizer:
   retentionDays: 7
-  cleanupIntervalHours: 6  # Clean up more frequently
+  cleanupIntervalHours: 6 # Clean up more frequently
 ```
 
 ## Verify It's Working
@@ -302,6 +321,7 @@ LIMIT 10
 ### "Could not load the default credentials"
 
 Make sure:
+
 1. Your service account key file exists
 2. The path in config.yaml matches the filename
 3. The service account has BigQuery permissions
@@ -309,17 +329,20 @@ Make sure:
 ### "Dataset already exists" but table creation fails
 
 The dataset might exist from a previous run. Either:
+
 - Delete it in BigQuery console and retry
 - Or just run with the existing dataset (table will be created)
 
 ### Slow historical data loading
 
 This is normal! Loading 30 days takes ~1 hour because:
+
 - 4.3 million records need to be generated
 - Each batch is rate-limited to avoid overwhelming BigQuery
 - Free tier has load job limits (1,500/day)
 
 To speed up (for testing):
+
 ```bash
 npx maritime-data-synthesizer initialize 7  # Just 7 days
 ```
@@ -334,6 +357,7 @@ npx maritime-data-synthesizer initialize 7  # Just 7 days
 ## Stopping the Service
 
 Press `Ctrl+C` in the terminal running the synthesizer. It will:
+
 - Stop generating new data
 - Clean up gracefully
 - Show final statistics

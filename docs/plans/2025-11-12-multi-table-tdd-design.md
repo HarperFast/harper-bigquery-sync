@@ -21,17 +21,20 @@ Extend the BigQuery sync plugin to support multiple tables using a test-first ap
 ### BigQuery Tables
 
 **1. `vessel_positions`** (existing, enhanced)
+
 - High volume: ~144K records/day
 - Primary tracking data: location, speed, heading
 - Timestamp column: `timestamp`
 
 **2. `port_events`** (new)
+
 - Medium volume: ~5-10K events/day
 - Vessel arrivals/departures at ports
 - Timestamp column: `event_time`
 - Relationships: Links to vessels via `mmsi`, ports via `port_id`
 
 **3. `vessel_metadata`** (new)
+
 - Low volume: ~100K vessels, rare updates
 - Vessel static information: name, type, specs
 - Timestamp column: `last_updated`
@@ -73,31 +76,27 @@ class TableGenerator {
 
 ```javascript
 class MultiTableOrchestrator {
-  constructor(config) {
-    this.generators = {
-      vessel_positions: new VesselPositionsGenerator(config),
-      port_events: new PortEventsGenerator(config),
-      vessel_metadata: new VesselMetadataGenerator(config)
-    };
-  }
+	constructor(config) {
+		this.generators = {
+			vessel_positions: new VesselPositionsGenerator(config),
+			port_events: new PortEventsGenerator(config),
+			vessel_metadata: new VesselMetadataGenerator(config),
+		};
+	}
 
-  async generateAll(timeRange, options = {}) {
-    // Generate all tables for the same time window
-    // Can enable/disable specific tables
-    const enabledGenerators = options.tables
-      ? options.tables.map(t => this.generators[t])
-      : Object.values(this.generators);
+	async generateAll(timeRange, options = {}) {
+		// Generate all tables for the same time window
+		// Can enable/disable specific tables
+		const enabledGenerators = options.tables
+			? options.tables.map((t) => this.generators[t])
+			: Object.values(this.generators);
 
-    await Promise.all(
-      enabledGenerators.map(g => g.generate(timeRange))
-    );
-  }
+		await Promise.all(enabledGenerators.map((g) => g.generate(timeRange)));
+	}
 
-  async clearAll() {
-    await Promise.all(
-      Object.values(this.generators).map(g => g.clear())
-    );
-  }
+	async clearAll() {
+		await Promise.all(Object.values(this.generators).map((g) => g.clear()));
+	}
 }
 ```
 
@@ -121,7 +120,7 @@ bigquery:
 
   # Array of tables to sync (NEW)
   tables:
-    - id: vessel_positions           # Unique identifier
+    - id: vessel_positions # Unique identifier
       dataset: maritime_tracking
       table: vessel_positions
       timestampColumn: timestamp
@@ -131,7 +130,7 @@ bigquery:
         - latitude
         - longitude
         - speed_knots
-      targetTable: VesselPositions   # Harper table name
+      targetTable: VesselPositions # Harper table name
       sync:
         initialBatchSize: 10000
         catchupBatchSize: 1000
@@ -157,7 +156,7 @@ bigquery:
       dataset: maritime_tracking
       table: vessel_metadata
       timestampColumn: last_updated
-      columns: "*"  # All vessel details
+      columns: '*' # All vessel details
       targetTable: VesselMetadata
       sync:
         initialBatchSize: 1000
@@ -187,15 +186,15 @@ bigquery:
 
 ```javascript
 export function getPluginConfig(fullConfig) {
-  // Detect multi-table vs legacy
-  if (fullConfig.bigquery.tables && Array.isArray(fullConfig.bigquery.tables)) {
-    return getMultiTableConfig(fullConfig);  // Returns { tables: [...] }
-  }
+	// Detect multi-table vs legacy
+	if (fullConfig.bigquery.tables && Array.isArray(fullConfig.bigquery.tables)) {
+		return getMultiTableConfig(fullConfig); // Returns { tables: [...] }
+	}
 
-  // Legacy single-table - wrap in tables array for unified handling
-  return {
-    tables: [getSingleTableConfig(fullConfig)]
-  };
+	// Legacy single-table - wrap in tables array for unified handling
+	return {
+		tables: [getSingleTableConfig(fullConfig)],
+	};
 }
 ```
 
@@ -204,16 +203,19 @@ export function getPluginConfig(fullConfig) {
 ### Minimal, Future-Proof Changes
 
 **Current Architecture:**
+
 ```
 service.js → SyncEngine (single table)
 ```
 
 **TDD Implementation (temporary, clean):**
+
 ```
 service.js → Loop over tables → SyncEngine (one per table)
 ```
 
 **Future Architecture (later refactoring):**
+
 ```
 service.js → SyncOrchestrator → TableSyncEngine[] (parallel)
 ```
@@ -275,15 +277,15 @@ export function getSingleTableConfig(fullConfig) {
 const config = getPluginConfig();
 
 // Create one SyncEngine per table
-const syncEngines = config.tables.map(tableConfig => {
-  return new SyncEngine(tableConfig);
+const syncEngines = config.tables.map((tableConfig) => {
+	return new SyncEngine(tableConfig);
 });
 
 // Initialize all engines
-await Promise.all(syncEngines.map(engine => engine.initialize()));
+await Promise.all(syncEngines.map((engine) => engine.initialize()));
 
 // Start all sync loops
-syncEngines.forEach(engine => engine.start());
+syncEngines.forEach((engine) => engine.start());
 
 // Store for cleanup
 globals.syncEngines = syncEngines;
@@ -401,68 +403,68 @@ async ingestRecords(records) {
 ```graphql
 # Updated checkpoint with composite ID and tableId index
 type SyncCheckpoint @table {
-  id: ID @primaryKey              # Format: "{tableId}_{nodeId}"
-  tableId: String! @indexed       # For querying by table
-  nodeId: Int!
-  lastTimestamp: String!
-  recordsIngested: Long!
-  lastSyncTime: String!
-  phase: String!
-  batchSize: Int!
+	id: ID @primaryKey # Format: "{tableId}_{nodeId}"
+	tableId: String! @indexed # For querying by table
+	nodeId: Int!
+	lastTimestamp: String!
+	recordsIngested: Long!
+	lastSyncTime: String!
+	phase: String!
+	batchSize: Int!
 }
 
 # Audit log with table tracking
 type SyncAudit @table {
-  id: ID! @primaryKey
-  timestamp: String! @indexed
-  tableId: String @indexed        # NEW: track which table
-  nodeId: Int
-  bigQueryCount: Long
-  harperCount: Long
-  delta: Long
-  status: String!
-  reason: String
-  recordSample: String
+	id: ID! @primaryKey
+	timestamp: String! @indexed
+	tableId: String @indexed # NEW: track which table
+	nodeId: Int
+	bigQueryCount: Long
+	harperCount: Long
+	delta: Long
+	status: String!
+	reason: String
+	recordSample: String
 }
 
 # Target tables (user defines these in their schema)
 # Example:
 
 type VesselPositions @table {
-  id: ID @primaryKey
-  timestamp: String @indexed
-  mmsi: String @indexed
-  vessel_name: String
-  latitude: Float
-  longitude: Float
-  speed_knots: Float
-  heading: Float
-  _syncedAt: String
+	id: ID @primaryKey
+	timestamp: String @indexed
+	mmsi: String @indexed
+	vessel_name: String
+	latitude: Float
+	longitude: Float
+	speed_knots: Float
+	heading: Float
+	_syncedAt: String
 }
 
 type PortEvents @table {
-  id: ID @primaryKey
-  event_time: String @indexed
-  port_id: String @indexed
-  vessel_mmsi: String @indexed
-  event_type: String
-  status: String
-  _syncedAt: String
+	id: ID @primaryKey
+	event_time: String @indexed
+	port_id: String @indexed
+	vessel_mmsi: String @indexed
+	event_type: String
+	status: String
+	_syncedAt: String
 }
 
 type VesselMetadata @table {
-  id: ID @primaryKey
-  mmsi: String! @primaryKey
-  last_updated: String @indexed
-  vessel_name: String
-  imo: String
-  vessel_type: String
-  flag: String
-  callsign: String
-  length: Float
-  beam: Float
-  draft: Float
-  _syncedAt: String
+	id: ID @primaryKey
+	mmsi: String! @primaryKey
+	last_updated: String @indexed
+	vessel_name: String
+	imo: String
+	vessel_type: String
+	flag: String
+	callsign: String
+	length: Float
+	beam: Float
+	draft: Float
+	_syncedAt: String
 }
 ```
 
@@ -471,16 +473,19 @@ type VesselMetadata @table {
 ### Test Structure
 
 **Level 1: Unit Tests** (generators)
+
 - Test each generator independently
 - Verify data quality and relationships
 - Fast, no BigQuery needed
 
 **Level 2: Synthesizer Integration Tests**
+
 - Generate multi-table data to BigQuery
 - Verify tables populated correctly
 - Verify relationships
 
 **Level 3: End-to-End Plugin Tests**
+
 - Configure plugin for multi-table sync
 - Run synthesizer to populate BigQuery
 - Sync all tables to Harper
@@ -589,24 +594,24 @@ describe('Multi-Table End-to-End', () => {
 ```javascript
 // test/fixtures/multi-table-test-data.js
 export const TEST_SCENARIOS = {
-  small: {
-    vessel_positions: 100,
-    port_events: 10,
-    vessel_metadata: 20,
-    duration: '1 hour'
-  },
-  realistic: {
-    vessel_positions: 10000,
-    port_events: 500,
-    vessel_metadata: 100,
-    duration: '24 hours'
-  },
-  stress: {
-    vessel_positions: 100000,
-    port_events: 5000,
-    vessel_metadata: 1000,
-    duration: '7 days'
-  }
+	small: {
+		vessel_positions: 100,
+		port_events: 10,
+		vessel_metadata: 20,
+		duration: '1 hour',
+	},
+	realistic: {
+		vessel_positions: 10000,
+		port_events: 500,
+		vessel_metadata: 100,
+		duration: '24 hours',
+	},
+	stress: {
+		vessel_positions: 100000,
+		port_events: 5000,
+		vessel_metadata: 1000,
+		duration: '7 days',
+	},
 };
 ```
 
@@ -615,11 +620,13 @@ export const TEST_SCENARIOS = {
 ### Phase 1: Tests & Synthesizer (Days 1-2)
 
 **Day 1: Test Infrastructure**
+
 - [ ] Write multi-table integration test suite (failing tests)
 - [ ] Create test fixtures and data scenarios
 - [ ] Set up test BigQuery dataset
 
 **Day 2: Data Synthesizer**
+
 - [ ] Build port-events-generator.js
 - [ ] Build vessel-metadata-generator.js
 - [ ] Build multi-table-orchestrator.js
@@ -628,12 +635,14 @@ export const TEST_SCENARIOS = {
 ### Phase 2: Plugin Implementation (Days 3-4)
 
 **Day 3: Config & Schema**
+
 - [ ] Extend config-loader.js for multi-table
 - [ ] Update schema with composite checkpoint IDs
 - [ ] Add backward compatibility detection
 - [ ] Make config parsing tests pass
 
 **Day 4: SyncEngine Updates**
+
 - [ ] Add tableId and targetTable to SyncEngine
 - [ ] Update checkpoint methods with composite IDs
 - [ ] Update ingestRecords for dynamic tables
@@ -643,6 +652,7 @@ export const TEST_SCENARIOS = {
 ### Phase 3: Validation (Day 5)
 
 **Day 5: End-to-End Testing**
+
 - [ ] Run full integration test suite
 - [ ] Verify data isolation between tables
 - [ ] Verify checkpoint independence
@@ -655,51 +665,52 @@ export const TEST_SCENARIOS = {
 When you're ready to refactor to parallel SyncEngines, the changes are minimal:
 
 ### Step 1: Rename SyncEngine → TableSyncEngine
+
 ```javascript
 // Just rename the class
 export class TableSyncEngine {
-  // Everything stays the same
+	// Everything stays the same
 }
 ```
 
 ### Step 2: Create SyncOrchestrator
+
 ```javascript
 export class SyncOrchestrator {
-  constructor(config) {
-    this.engines = config.tables.map(tableConfig =>
-      new TableSyncEngine(tableConfig)
-    );
-  }
+	constructor(config) {
+		this.engines = config.tables.map((tableConfig) => new TableSyncEngine(tableConfig));
+	}
 
-  async initialize() {
-    await Promise.all(this.engines.map(e => e.initialize()));
-  }
+	async initialize() {
+		await Promise.all(this.engines.map((e) => e.initialize()));
+	}
 
-  async startAll() {
-    // Was: syncEngines.forEach(e => e.start())
-    // Now: this.engines.forEach(e => e.start())
-    this.engines.forEach(e => e.start());
-  }
+	async startAll() {
+		// Was: syncEngines.forEach(e => e.start())
+		// Now: this.engines.forEach(e => e.start())
+		this.engines.forEach((e) => e.start());
+	}
 
-  async stopAll() {
-    await Promise.all(this.engines.map(e => e.stop()));
-  }
+	async stopAll() {
+		await Promise.all(this.engines.map((e) => e.stop()));
+	}
 
-  getStatus() {
-    return this.engines.map(e => ({
-      tableId: e.tableId,
-      status: e.getStatus()
-    }));
-  }
+	getStatus() {
+		return this.engines.map((e) => ({
+			tableId: e.tableId,
+			status: e.getStatus(),
+		}));
+	}
 }
 ```
 
 ### Step 3: Update service.js
+
 ```javascript
 // Before (TDD implementation):
-const syncEngines = config.tables.map(t => new SyncEngine(t));
-await Promise.all(syncEngines.map(e => e.initialize()));
-syncEngines.forEach(e => e.start());
+const syncEngines = config.tables.map((t) => new SyncEngine(t));
+await Promise.all(syncEngines.map((e) => e.initialize()));
+syncEngines.forEach((e) => e.start());
 
 // After (parallel architecture):
 const orchestrator = new SyncOrchestrator(config);
@@ -767,6 +778,7 @@ This section documents how the actual implementation followed or diverged from t
 
 **Design:** 3 tables (vessel_positions, port_events, vessel_metadata)
 **Implementation:** ✅ Exactly as designed
+
 - vessel_positions: timestamp column
 - port_events: event_time column
 - vessel_metadata: last_updated column
@@ -776,6 +788,7 @@ This section documents how the actual implementation followed or diverged from t
 #### 2. Data Synthesizer Architecture ⚠️ DIVERGED
 
 **Design:**
+
 ```
 src/generators/
   vessel-positions-generator.js
@@ -785,6 +798,7 @@ src/generators/
 ```
 
 **Actual Implementation:**
+
 ```
 ext/maritime-data-synthesizer/generators/
   vessel-positions-generator.js   (NEW - wrapper around main generator)
@@ -794,6 +808,7 @@ ext/maritime-data-synthesizer/generators/
 ```
 
 **Reason for Divergence:**
+
 - The orchestrator and two generators (port-events, vessel-metadata) already existed in the codebase
 - Only needed to create vessel-positions-generator.js as a wrapper
 - Saved significant development time
@@ -803,6 +818,7 @@ ext/maritime-data-synthesizer/generators/
 #### 3. Generator Interface ⚠️ MODIFIED
 
 **Design:**
+
 ```javascript
 class TableGenerator {
   async initialize(config)
@@ -814,6 +830,7 @@ class TableGenerator {
 ```
 
 **Actual Implementation:**
+
 ```javascript
 class TableGenerator {
   constructor({ startTime, durationMs, vessels/mmsiList })
@@ -824,6 +841,7 @@ class TableGenerator {
 ```
 
 **Reason for Divergence:**
+
 - Orchestrator handles BigQuery writes, not individual generators
 - Simpler interface: generators focus on data generation only
 - Write/clear operations centralized in orchestrator
@@ -836,6 +854,7 @@ class TableGenerator {
 **Implementation:** ✅ Implemented as designed
 
 **Critical Fix Applied:**
+
 ```javascript
 // Design assumed: table.insert() (streaming API)
 // Actual: table.load() (load job API with NDJSON files)
@@ -844,6 +863,7 @@ class TableGenerator {
 **Reason:** BigQuery streaming inserts not available in free tier and have cost/limitations
 
 **Implementation Details:**
+
 - Creates temp NDJSON files for each batch
 - Uses load job API (`table.load()`)
 - Cleans up temp files after load
@@ -875,25 +895,28 @@ bigquery:
 #### 6. Plugin Implementation Changes ✅ FOLLOWED
 
 **Config Loader (src/config-loader.js):**
+
 - ✅ getMultiTableConfig() implemented
 - ✅ getSingleTableConfig() backward compatibility
 - ✅ Column validation and normalization
 - ✅ Duplicate targetTable detection added (NOT in design, but needed)
 
 **Service Entry Point (src/index.js):**
+
 ```javascript
 // Design: Loop over tables → SyncEngine
 // Actual: ✅ Exactly as designed
 
 const syncEngines = [];
 for (const tableConfig of fullConfig.bigquery.tables) {
-  const syncEngine = new SyncEngine(tableSpecificConfig);
-  await syncEngine.initialize();
-  syncEngines.push(syncEngine);
+	const syncEngine = new SyncEngine(tableSpecificConfig);
+	await syncEngine.initialize();
+	syncEngines.push(syncEngine);
 }
 ```
 
 **SyncEngine Changes (src/sync-engine.js):**
+
 - ✅ Added this.tableId for table identification
 - ✅ Added this.targetTable for dynamic Harper table routing
 - ✅ Composite checkpoint IDs: `${tableId}_${nodeId}`
@@ -907,14 +930,15 @@ for (const tableConfig of fullConfig.bigquery.tables) {
 
 ```graphql
 type SyncCheckpoint @table {
-  id: ID @primaryKey              # Format: "{tableId}_{nodeId}"
-  tableId: String! @indexed       # For querying by table
-  nodeId: Int!
-  # ... rest of fields
+	id: ID @primaryKey # Format: "{tableId}_{nodeId}"
+	tableId: String! @indexed # For querying by table
+	nodeId: Int!
+	# ... rest of fields
 }
 ```
 
 **Target Tables:**
+
 - ✅ VesselPositions defined
 - ✅ PortEvents defined
 - ✅ VesselMetadata defined
@@ -925,6 +949,7 @@ type SyncCheckpoint @table {
 **Implementation:** ✅ Comprehensive test suite
 
 **Test Coverage:**
+
 - 17 multi-table sync integration tests
 - 29 validation service multi-table tests
 - 11 vessel-positions-generator tests
@@ -932,6 +957,7 @@ type SyncCheckpoint @table {
 - **Total: 66 tests, all passing**
 
 **Test Scenarios Implemented:**
+
 - ✅ Sync 3 tables independently
 - ✅ Separate checkpoints per table
 - ✅ One table failure doesn't affect others
@@ -943,6 +969,7 @@ type SyncCheckpoint @table {
 #### 9. Validation Service ✅ ENHANCED BEYOND DESIGN
 
 **Not in Original Design, but Added:**
+
 - Multi-table validation support
 - Per-table health checks (progress, smoke test, spot check)
 - Composite checkpoint ID validation
@@ -957,16 +984,19 @@ type SyncCheckpoint @table {
 **Implementation:** Multi-table orchestrator CLI added
 
 **Commands:**
+
 ```bash
 npx maritime-data-synthesizer initialize <scenario>
 # Scenarios: small, realistic, stress
 ```
 
 **Limitation:**
+
 - `start` command (continuous generation) only works in single-table mode
 - Multi-table mode only supports `initialize` (one-time generation)
 
 **Reason:** Continuous multi-table generation would need:
+
 - Per-table generation intervals
 - Per-table cleanup schedules
 - More complex orchestration
@@ -988,19 +1018,23 @@ export class VesselMetadata extends tables.VesselMetadata { ... }
 ### Key Implementation Decisions Made
 
 #### 1. BigQuery API Choice (FREE TIER vs PRODUCTION)
+
 **Decision:** Use load job API instead of streaming insert API
 **Reason:**
+
 - Free tier compatibility - streaming inserts not available in BigQuery free tier
 - Lower costs for development/testing
 - No rate limits or quotas
 - More reliable for batch operations
 
 **Impact:**
+
 - Slightly slower (requires file I/O for NDJSON temp files)
 - More reliable and cost-effective for free tier users
 - Suitable for most use cases
 
 **TODO - Production Enhancement:**
+
 ```
 TODO: Add configuration option to enable streaming insert API for production deployments
 - Streaming inserts offer higher performance (no file I/O)
@@ -1011,43 +1045,49 @@ TODO: Add configuration option to enable streaming insert API for production dep
 ```
 
 **Current Implementation:**
+
 ```javascript
 // Uses load job API with NDJSON files (free tier compatible)
 const tmpFile = path.join(os.tmpdir(), `bigquery-load-${Date.now()}.json`);
 fs.writeFileSync(tmpFile, ndjson);
 await table.load(tmpFile, {
-  sourceFormat: 'NEWLINE_DELIMITED_JSON',
-  writeDisposition: 'WRITE_APPEND'
+	sourceFormat: 'NEWLINE_DELIMITED_JSON',
+	writeDisposition: 'WRITE_APPEND',
 });
 fs.unlinkSync(tmpFile);
 ```
 
 **Future Enhancement:**
+
 ```javascript
 // Optional: Streaming insert for production (paid tier)
 if (config.useStreamingInsert) {
-  await table.insert(records);  // Faster, no files
+	await table.insert(records); // Faster, no files
 } else {
-  // Fall back to load job API (current implementation)
+	// Fall back to load job API (current implementation)
 }
 ```
 
 #### 2. Generator Responsibility
+
 **Decision:** Generators only generate data, don't write to BigQuery
 **Reason:** Orchestrator centralizes BigQuery operations
 **Impact:** Cleaner separation, easier testing
 
 #### 3. Checkpoint ID Format
+
 **Design:** `${tableId}_${nodeId}`
 **Implementation:** ✅ Exactly as designed
 **Validation:** Added runtime checks for duplicate targetTable
 
 #### 4. Error Handling Strategy
+
 **Decision:** Tables sync independently, one failure doesn't stop others
 **Implementation:** ✅ Try-catch per table in validation and sync
 **Impact:** Better fault isolation
 
 #### 5. Verification Step
+
 **Enhancement:** Added verify() method to orchestrator
 **Purpose:** Confirm data loaded correctly after generation
 **Implementation:** Uses correct timestamp column per table
@@ -1078,6 +1118,7 @@ if (config.useStreamingInsert) {
 ### Performance & Quality Metrics
 
 **Test Coverage:**
+
 - Unit tests: 11 (generator wrapper)
 - Integration tests: 17 (multi-table sync)
 - Validation tests: 29 (multi-table validation)
@@ -1085,12 +1126,14 @@ if (config.useStreamingInsert) {
 - **Total: 66 tests, 100% passing**
 
 **Code Quality:**
+
 - Zero TODOs for critical functionality
 - One TODO for future enhancement (dynamic table creation)
 - All tests green before each commit
 - Comprehensive error handling
 
 **Documentation:**
+
 - README updated with multi-table examples
 - Config files documented (config.yaml, config.multi-table.yaml)
 - Design document maintained (this file)
@@ -1129,6 +1172,7 @@ if (config.useStreamingInsert) {
 **Future State:** Parallel orchestrator (when needed)
 
 **Migration Checklist:**
+
 - [ ] Rename SyncEngine → TableSyncEngine
 - [ ] Create SyncOrchestrator class
 - [ ] Update service.js to use orchestrator

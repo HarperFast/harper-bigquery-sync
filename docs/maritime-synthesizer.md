@@ -5,6 +5,7 @@ A production-ready synthetic data generator that creates realistic vessel tracki
 ## What It Does
 
 Generates millions of realistic vessel position records with:
+
 - **100,000+ vessels** in the global fleet
 - **6 vessel types** (container ships, bulk carriers, tankers, cargo, passenger, fishing)
 - **29 major ports** worldwide with realistic traffic patterns
@@ -20,8 +21,8 @@ Edit `config.yaml`:
 ```yaml
 bigquery:
   projectId: your-gcp-project-id
-  dataset: your_dataset          # Plugin reads from here
-  table: your_table              # Plugin reads from here
+  dataset: your_dataset # Plugin reads from here
+  table: your_table # Plugin reads from here
   credentials: service-account-key.json
   location: US
 
@@ -30,8 +31,8 @@ bigquery:
 synthesizer:
   # dataset: maritime_tracking   # Optional: Override to use different dataset
   # table: vessel_positions      # Optional: Override to use different table
-  batchSize: 100                 # Optional: Defaults to 100
-  generationIntervalMs: 60000    # Optional: Defaults to 60000
+  batchSize: 100 # Optional: Defaults to 100
+  generationIntervalMs: 60000 # Optional: Defaults to 60000
 ```
 
 **That's it!** The synthesizer uses the same BigQuery connection and target as your plugin by default.
@@ -51,6 +52,7 @@ npx maritime-data-synthesizer start
 ```
 
 **Automatic rolling window mode:**
+
 - Checks current data and backfills if needed
 - Generates 100 vessel positions every 60 seconds (144K records/day)
 - Maintains exactly N days of data automatically
@@ -61,16 +63,19 @@ npx maritime-data-synthesizer start
 ## Why Use This?
 
 ### For Testing the BigQuery Plugin
+
 - Generate realistic test data without accessing real vessel tracking systems
 - Test data pipeline performance at scale
 - Validate data transformation and aggregation logic
 
 ### For Development
+
 - Local development without production data access
 - Reproducible test datasets
 - Privacy-compliant synthetic data
 
 ### For Analytics & ML
+
 - Train predictive models for vessel arrival times
 - Develop anomaly detection algorithms
 - Build maritime traffic visualization dashboards
@@ -79,23 +84,27 @@ npx maritime-data-synthesizer start
 ## Key Features
 
 ### Realistic Data
+
 - Vessels move between actual ports (Singapore, Rotterdam, Los Angeles, etc.)
 - Proper speeds for vessel types (8-30 knots)
 - Port operations (anchoring, mooring) and ocean transit
 - Journey tracking with destinations and ETAs
 
 ### Optimized for BigQuery
+
 - Uses load jobs (free tier compatible)
 - Partitioned by timestamp
 - Clustered by vessel_type, mmsi, report_date
 - Automatic cleanup of old data
 
 ### Simple Configuration
+
 - **Shares config with the plugin** - no duplicate setup!
 - Same project, credentials, location
 - Just configure the target dataset/table
 
 ### Production-Ready
+
 - Event-driven architecture
 - Comprehensive error handling
 - Progress tracking and statistics
@@ -129,6 +138,7 @@ report_date          STRING      Date in YYYYMMDD format
 ## Example Queries
 
 ### Active Vessels by Type
+
 ```sql
 SELECT
   vessel_type,
@@ -141,6 +151,7 @@ ORDER BY vessel_count DESC
 ```
 
 ### Vessels in a Region
+
 ```sql
 SELECT *
 FROM `your-project.maritime_tracking.vessel_positions`
@@ -151,6 +162,7 @@ ORDER BY timestamp DESC
 ```
 
 ### Port Activity
+
 ```sql
 SELECT
   destination as port,
@@ -198,8 +210,8 @@ In `config.yaml`:
 ```yaml
 bigquery:
   projectId: your-gcp-project-id
-  dataset: your_dataset             # Default target for synthesizer
-  table: your_table                 # Default target for synthesizer
+  dataset: your_dataset # Default target for synthesizer
+  table: your_table # Default target for synthesizer
   credentials: service-account-key.json
 
 synthesizer:
@@ -220,6 +232,7 @@ synthesizer:
 **Records per day** = `(86,400,000 / generationIntervalMs) × batchSize`
 
 Examples:
+
 - Default (100 × 60s): **144,000 records/day**
 - High volume (1000 × 60s): **1,440,000 records/day**
 - Low volume (10 × 600s): **1,440 records/day**
@@ -274,6 +287,7 @@ When you run `npx maritime-data-synthesizer start`, the service:
 ### Example Scenarios
 
 #### Fresh Start (No Data)
+
 ```
 Checking data range (target: 30 days)...
 ❌ No existing data found
@@ -288,6 +302,7 @@ Action: Initializing with 30 days of historical data
 ```
 
 #### Partial Data (7 days)
+
 ```
 Checking data range (target: 30 days)...
 ✓ Found 1,008,000 records covering 7 days
@@ -301,6 +316,7 @@ Action: Backfilling 23 days
 ```
 
 #### Sufficient Data (30+ days)
+
 ```
 Checking data range (target: 30 days)...
 ✓ Found 4,320,000 records covering 30 days
@@ -315,12 +331,14 @@ Checking data range (target: 30 days)...
 **Zero Manual Intervention** - No need to run `initialize` before `start`. Just start the service and it handles everything.
 
 **Old workflow:**
+
 ```bash
 npx maritime-data-synthesizer initialize 30  # Manual step
 npx maritime-data-synthesizer start          # Then start
 ```
 
 **New workflow:**
+
 ```bash
 npx maritime-data-synthesizer start          # That's it!
 ```
@@ -328,6 +346,7 @@ npx maritime-data-synthesizer start          # That's it!
 **Graceful Recovery** - Service can be stopped and restarted at any time. It will check current state, backfill if needed, and resume.
 
 **Consistent State** - Always maintains exactly N days of data:
+
 - New data continuously added at the front
 - Old data automatically removed from the back
 - Window size remains constant
@@ -340,8 +359,8 @@ Rolling window behavior is controlled by `retentionDays` in `config.yaml`:
 
 ```yaml
 synthesizer:
-  retentionDays: 30           # Target window size
-  cleanupIntervalHours: 24    # How often to clean up old data
+  retentionDays: 30 # Target window size
+  cleanupIntervalHours: 24 # How often to clean up old data
 ```
 
 ### Skip Backfill
@@ -353,6 +372,7 @@ npx maritime-data-synthesizer start --no-backfill
 ```
 
 This mode:
+
 - Skips data range check
 - No backfilling
 - Only generates new data going forward

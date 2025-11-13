@@ -18,6 +18,7 @@ We release patches for security vulnerabilities for the following versions:
 Send security vulnerabilities to: **security@harperdb.io**
 
 Include:
+
 - Description of the vulnerability
 - Steps to reproduce
 - Potential impact
@@ -66,12 +67,14 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
 For the BigQuery plugin/synthesizer, service accounts need:
 
 **Minimum Required**:
+
 - `bigquery.jobs.create`
 - `bigquery.tables.getData`
 - `bigquery.tables.create`
 - `bigquery.tables.updateData`
 
 **Not Required**:
+
 - `bigquery.datasets.delete`
 - `bigquery.tables.delete` (unless using clean/reset)
 - Admin permissions
@@ -79,6 +82,7 @@ For the BigQuery plugin/synthesizer, service accounts need:
 ### Configuration Security
 
 **config.yaml**:
+
 ```yaml
 # Safe - relative path to credential file
 bigquery:
@@ -90,6 +94,7 @@ bigquery:
 ```
 
 **.env file**:
+
 ```bash
 # Always add to .gitignore
 echo ".env" >> .gitignore
@@ -120,6 +125,7 @@ echo ".env.*.local" >> .gitignore
 **Issue**: config.yaml references credential files
 
 **Mitigation**:
+
 - Credential files must be in .gitignore
 - Use environment variables where possible
 - Rotate keys regularly
@@ -129,6 +135,7 @@ echo ".env.*.local" >> .gitignore
 **Issue**: Synthetic data may resemble production patterns
 
 **Mitigation**:
+
 - Use synthesizer only for testing
 - Don't use production data characteristics
 - Sanitize any borrowed patterns
@@ -138,6 +145,7 @@ echo ".env.*.local" >> .gitignore
 **Issue**: Malicious or buggy code could incur costs
 
 **Mitigation**:
+
 - Set up billing alerts
 - Use BigQuery quotas
 - Monitor query patterns
@@ -148,6 +156,7 @@ echo ".env.*.local" >> .gitignore
 **Issue**: Distributed system requires node trust
 
 **Mitigation**:
+
 - Use HarperDB authentication
 - TLS for inter-node communication
 - Network isolation where possible
@@ -193,6 +202,7 @@ npm audit fix --force  # Use with caution
 ### Automated Scanning
 
 We use:
+
 - GitHub Dependabot
 - npm audit in CI/CD
 - Snyk (optional)
@@ -219,6 +229,7 @@ Security patches are released as soon as possible:
 - **Low**: Included in next release cycle
 
 Users are notified via:
+
 - GitHub Security Advisories
 - Release notes
 - Email (for critical issues)
@@ -226,6 +237,7 @@ Users are notified via:
 ## Compliance
 
 This project aims to follow:
+
 - OWASP Top 10
 - CIS Benchmarks
 - NIST Cybersecurity Framework (where applicable)
@@ -240,6 +252,7 @@ This project aims to follow:
 ## Contact
 
 For security concerns:
+
 - Email: security@harperdb.io
 - Expect response within 48 hours
 - PGP key available on request
