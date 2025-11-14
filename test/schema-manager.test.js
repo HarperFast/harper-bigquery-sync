@@ -24,17 +24,11 @@ describe('SchemaManager', () => {
 		});
 
 		it('should throw if bigQueryClient is missing', () => {
-			assert.throws(
-				() => new SchemaManager({ config: {} }),
-				/bigQueryClient is required/
-			);
+			assert.throws(() => new SchemaManager({ config: {} }), /bigQueryClient is required/);
 		});
 
 		it('should throw if config is missing', () => {
-			assert.throws(
-				() => new SchemaManager({ bigQueryClient: {} }),
-				/config is required/
-			);
+			assert.throws(() => new SchemaManager({ bigQueryClient: {} }), /config is required/);
 		});
 	});
 
@@ -46,9 +40,7 @@ describe('SchemaManager', () => {
 			});
 
 			const bigQuerySchema = {
-				fields: [
-					{ name: 'id', type: 'STRING', mode: 'REQUIRED' },
-				],
+				fields: [{ name: 'id', type: 'STRING', mode: 'REQUIRED' }],
 			};
 
 			const result = manager.determineMigrationNeeds(null, bigQuerySchema);
@@ -99,9 +91,7 @@ describe('SchemaManager', () => {
 			};
 
 			const bigQuerySchema = {
-				fields: [
-					{ name: 'id', type: 'STRING', mode: 'REQUIRED' },
-				],
+				fields: [{ name: 'id', type: 'STRING', mode: 'REQUIRED' }],
 			};
 
 			const result = manager.determineMigrationNeeds(harperSchema, bigQuerySchema);
@@ -123,9 +113,7 @@ describe('SchemaManager', () => {
 			};
 
 			const bigQuerySchema = {
-				fields: [
-					{ name: 'count', type: 'INTEGER', mode: 'NULLABLE' },
-				],
+				fields: [{ name: 'count', type: 'INTEGER', mode: 'NULLABLE' }],
 			};
 
 			const result = manager.determineMigrationNeeds(harperSchema, bigQuerySchema);

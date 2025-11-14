@@ -66,9 +66,7 @@ describe('IndexStrategy', () => {
 
 		it('should return unique indexes', () => {
 			const strategy = new IndexStrategy({ timestampColumn: 'timestamp' });
-			const fields = [
-				{ name: 'timestamp', type: 'TIMESTAMP' },
-			];
+			const fields = [{ name: 'timestamp', type: 'TIMESTAMP' }];
 
 			const result = strategy.getIndexes(fields);
 

@@ -42,10 +42,7 @@ export class SchemaLeaderElection {
 
 			// Back off after 3 consecutive checks with no changes
 			if (this.consecutiveNoChanges >= 3) {
-				this.currentInterval = Math.min(
-					this.currentInterval * this.backoffMultiplier,
-					this.maxInterval
-				);
+				this.currentInterval = Math.min(this.currentInterval * this.backoffMultiplier, this.maxInterval);
 			}
 		}
 	}
