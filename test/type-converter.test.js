@@ -2,7 +2,7 @@
  * Tests for type-converter.js
  */
 
-import { describe, it } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import {
 	convertBigInt,
@@ -12,7 +12,26 @@ import {
 	convertBigQueryRecords,
 } from '../src/type-converter.js';
 
+// Mock logger global that Harper provides at runtime
+const mockLogger = {
+	info: () => {},
+	debug: () => {},
+	trace: () => {},
+	warn: () => {},
+	error: () => {},
+};
+
 describe('Type Converter', () => {
+	before(() => {
+		// Set up global logger mock
+		global.logger = mockLogger;
+	});
+
+	after(() => {
+		// Clean up global logger mock
+		delete global.logger;
+	});
+
 	describe('convertBigInt', () => {
 		it('should convert small BigInt to Number', () => {
 			const result = convertBigInt(BigInt(12345));

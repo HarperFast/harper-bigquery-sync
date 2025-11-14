@@ -4,11 +4,30 @@
  * Tests BigQuery to Harper type mapping
  */
 
-import { describe, it } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import { TypeMapper } from '../src/type-mapper.js';
 
+// Mock logger global that Harper provides at runtime
+const mockLogger = {
+	info: () => {},
+	debug: () => {},
+	trace: () => {},
+	warn: () => {},
+	error: () => {},
+};
+
 describe('TypeMapper', () => {
+	before(() => {
+		// Set up global logger mock
+		global.logger = mockLogger;
+	});
+
+	after(() => {
+		// Clean up global logger mock
+		delete global.logger;
+	});
+
 	describe('mapScalarType', () => {
 		it('should map INTEGER to Int', () => {
 			const mapper = new TypeMapper();

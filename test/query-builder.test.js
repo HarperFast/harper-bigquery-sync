@@ -2,7 +2,7 @@
  * Tests for query-builder.js
  */
 
-import { describe, it } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import {
 	formatColumnList,
@@ -12,7 +12,26 @@ import {
 	QueryBuilder,
 } from '../src/query-builder.js';
 
+// Mock logger global that Harper provides at runtime
+const mockLogger = {
+	info: () => {},
+	debug: () => {},
+	trace: () => {},
+	warn: () => {},
+	error: () => {},
+};
+
 describe('Query Builder', () => {
+	before(() => {
+		// Set up global logger mock
+		global.logger = mockLogger;
+	});
+
+	after(() => {
+		// Clean up global logger mock
+		delete global.logger;
+	});
+
 	describe('formatColumnList', () => {
 		it('should format single wildcard as *', () => {
 			const result = formatColumnList(['*']);

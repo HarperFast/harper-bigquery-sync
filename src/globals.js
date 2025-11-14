@@ -7,10 +7,17 @@ class Globals {
 		Globals.instance = this;
 	}
 	set(key, value) {
+		logger.debug(`[Globals.set] Setting '${key}' = ${JSON.stringify(value)}`);
 		this.data[key] = value;
 	}
 	get(key) {
-		return this.data[key];
+		const value = this.data[key];
+		if (value === undefined) {
+			logger.debug(`[Globals.get] Key '${key}' not found`);
+		} else {
+			logger.debug(`[Globals.get] Retrieved '${key}' = ${JSON.stringify(value)}`);
+		}
+		return value;
 	}
 }
 

@@ -13,20 +13,25 @@
  */
 export function formatColumnList(columns) {
 	if (!Array.isArray(columns)) {
+		logger.error('[formatColumnList] Invalid input: columns must be an array');
 		throw new Error('columns must be an array');
 	}
 
 	if (columns.length === 0) {
+		logger.error('[formatColumnList] Invalid input: columns array cannot be empty');
 		throw new Error('columns array cannot be empty');
 	}
 
 	// Special case: ['*'] means SELECT *
 	if (columns.length === 1 && columns[0] === '*') {
+		logger.debug('[formatColumnList] Using wildcard SELECT *');
 		return '*';
 	}
 
 	// Format as comma-separated list with proper spacing
-	return columns.join(', ');
+	const formatted = columns.join(', ');
+	logger.debug(`[formatColumnList] Formatted ${columns.length} columns: ${formatted}`);
+	return formatted;
 }
 
 /**
@@ -41,16 +46,24 @@ export function formatColumnList(columns) {
  */
 export function buildPullPartitionQuery({ dataset, table, timestampColumn, columns }) {
 	if (!dataset || !table || !timestampColumn) {
+		logger.error(
+			'[buildPullPartitionQuery] Missing required parameters: dataset, table, and timestampColumn are required'
+		);
 		throw new Error('dataset, table, and timestampColumn are required');
 	}
 
 	if (!columns || !Array.isArray(columns)) {
+		logger.error('[buildPullPartitionQuery] Invalid columns parameter: must be a non-empty array');
 		throw new Error('columns must be a non-empty array');
 	}
 
+	logger.info(
+		`[buildPullPartitionQuery] Building pull query for ${dataset}.${table} with ${columns.length === 1 && columns[0] === '*' ? 'all columns' : `${columns.length} columns`}`
+	);
+
 	const columnList = formatColumnList(columns);
 
-	return `
+	const query = `
     SELECT ${columnList}
     FROM \`${dataset}.${table}\`
     WHERE
@@ -64,6 +77,9 @@ export function buildPullPartitionQuery({ dataset, table, timestampColumn, colum
     ORDER BY ${timestampColumn} ASC
     LIMIT CAST(@batchSize AS INT64)
   `;
+
+	logger.debug('[buildPullPartitionQuery] Query construction complete');
+	return query;
 }
 
 /**
@@ -126,6 +142,7 @@ export class QueryBuilder {
 	 */
 	constructor({ dataset, table, timestampColumn, columns = ['*'] }) {
 		if (!dataset || !table || !timestampColumn) {
+			logger.error('[QueryBuilder] Missing required parameters: dataset, table, and timestampColumn are required');
 			throw new Error('dataset, table, and timestampColumn are required');
 		}
 
@@ -133,6 +150,10 @@ export class QueryBuilder {
 		this.table = table;
 		this.timestampColumn = timestampColumn;
 		this.columns = columns;
+
+		logger.info(
+			`[QueryBuilder] Initialized for ${dataset}.${table} with timestamp column '${timestampColumn}' and ${columns.length === 1 && columns[0] === '*' ? 'all columns' : `${columns.length} columns`}`
+		);
 	}
 
 	/**

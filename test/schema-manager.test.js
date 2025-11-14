@@ -4,11 +4,30 @@
  * Tests schema management and table creation logic
  */
 
-import { describe, it } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import { SchemaManager } from '../src/schema-manager.js';
 
+// Mock logger global that Harper provides at runtime
+const mockLogger = {
+	info: () => {},
+	debug: () => {},
+	trace: () => {},
+	warn: () => {},
+	error: () => {},
+};
+
 describe('SchemaManager', () => {
+	before(() => {
+		// Set up global logger mock
+		global.logger = mockLogger;
+	});
+
+	after(() => {
+		// Clean up global logger mock
+		delete global.logger;
+	});
+
 	describe('constructor', () => {
 		it('should initialize with required dependencies', () => {
 			const mockBigQueryClient = {};

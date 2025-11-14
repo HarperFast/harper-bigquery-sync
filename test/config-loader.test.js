@@ -2,11 +2,29 @@
  * Tests for config-loader.js
  */
 
-import { describe, it } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import { getSynthesizerConfig, getPluginConfig } from '../src/config-loader.js';
 
+// Mock logger global that Harper provides at runtime
+const mockLogger = {
+	info: () => {},
+	debug: () => {},
+	trace: () => {},
+	warn: () => {},
+	error: () => {},
+};
+
 describe('Config Loader', () => {
+	before(() => {
+		// Set up global logger mock
+		global.logger = mockLogger;
+	});
+
+	after(() => {
+		// Clean up global logger mock
+		delete global.logger;
+	});
 	describe('getSynthesizerConfig', () => {
 		it('should use bigquery config as defaults', () => {
 			const mockConfig = {

@@ -32,18 +32,25 @@ function looksLikeISODate(str) {
  * @returns {Date|*} Date object if conversion succeeds, original value otherwise
  */
 export function convertBigQueryTimestamp(value) {
+	logger.debug(`[convertBigQueryTimestamp] Converting BigQuery timestamp (constructor: ${value.constructor?.name})`);
+
 	// Try .value property (contains ISO string)
 	if (value.value) {
-		return new Date(value.value);
+		const date = new Date(value.value);
+		logger.debug(`[convertBigQueryTimestamp] Converted via .value property: ${date.toISOString()}`);
+		return date;
 	}
 
 	// Try .toJSON() method
 	if (typeof value.toJSON === 'function') {
 		const jsonValue = value.toJSON();
-		return new Date(jsonValue);
+		const date = new Date(jsonValue);
+		logger.debug(`[convertBigQueryTimestamp] Converted via .toJSON(): ${date.toISOString()}`);
+		return date;
 	}
 
 	// Unable to convert
+	logger.warn('[convertBigQueryTimestamp] Unable to convert timestamp, returning original value');
 	return value;
 }
 
@@ -54,8 +61,10 @@ export function convertBigQueryTimestamp(value) {
  */
 export function convertBigInt(value) {
 	if (value <= Number.MAX_SAFE_INTEGER && value >= Number.MIN_SAFE_INTEGER) {
+		logger.debug(`[convertBigInt] Converting BigInt ${value} to Number (within safe range)`);
 		return Number(value);
 	}
+	logger.warn(`[convertBigInt] BigInt ${value} exceeds safe integer range, converting to String`);
 	return value.toString();
 }
 
@@ -67,11 +76,13 @@ export function convertBigInt(value) {
 export function convertValue(value) {
 	// Handle null/undefined
 	if (value === null || value === undefined) {
+		logger.debug(`[convertValue] Value is ${value}, no conversion needed`);
 		return value;
 	}
 
 	// Handle BigInt
 	if (typeof value === 'bigint') {
+		logger.debug('[convertValue] Detected BigInt value, converting');
 		return convertBigInt(value);
 	}
 
@@ -79,11 +90,13 @@ export function convertValue(value) {
 	if (typeof value === 'object') {
 		// BigQuery timestamp types
 		if (isBigQueryTimestamp(value)) {
+			logger.debug('[convertValue] Detected BigQuery timestamp, converting');
 			return convertBigQueryTimestamp(value);
 		}
 
 		// Already a Date object
 		if (value instanceof Date) {
+			logger.debug('[convertValue] Value is already a Date object');
 			return value;
 		}
 
@@ -93,17 +106,21 @@ export function convertValue(value) {
 
 			// If it looks like an ISO date, convert to Date
 			if (looksLikeISODate(jsonValue)) {
+				logger.debug('[convertValue] Object.toJSON() returned ISO date string, converting to Date');
 				return new Date(jsonValue);
 			}
 
+			logger.debug('[convertValue] Object.toJSON() returned non-date value');
 			return jsonValue;
 		}
 
 		// Other objects - keep as-is
+		logger.debug('[convertValue] Object has no special handling, keeping as-is');
 		return value;
 	}
 
 	// Primitive types - keep as-is
+	logger.debug(`[convertValue] Primitive value (${typeof value}), no conversion needed`);
 	return value;
 }
 
@@ -115,8 +132,11 @@ export function convertValue(value) {
  */
 export function convertBigQueryTypes(record) {
 	if (!record || typeof record !== 'object') {
+		logger.error('[convertBigQueryTypes] Invalid input: record must be an object');
 		throw new Error('Record must be an object');
 	}
+
+	logger.debug(`[convertBigQueryTypes] Converting record with ${Object.keys(record).length} fields`);
 
 	const converted = {};
 
@@ -124,6 +144,7 @@ export function convertBigQueryTypes(record) {
 		converted[key] = convertValue(value);
 	}
 
+	logger.debug('[convertBigQueryTypes] Record conversion complete');
 	return converted;
 }
 
@@ -134,10 +155,16 @@ export function convertBigQueryTypes(record) {
  */
 export function convertBigQueryRecords(records) {
 	if (!Array.isArray(records)) {
+		logger.error('[convertBigQueryRecords] Invalid input: records must be an array');
 		throw new Error('Records must be an array');
 	}
 
-	return records.map((record) => convertBigQueryTypes(record));
+	logger.info(`[convertBigQueryRecords] Converting ${records.length} records`);
+
+	const converted = records.map((record) => convertBigQueryTypes(record));
+
+	logger.info('[convertBigQueryRecords] Batch conversion complete');
+	return converted;
 }
 
 export default {

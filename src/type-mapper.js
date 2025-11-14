@@ -43,7 +43,15 @@ export class TypeMapper {
 		};
 
 		const normalized = bigQueryType.toUpperCase();
-		return typeMap[normalized] || 'String';
+		const harperType = typeMap[normalized];
+
+		if (harperType) {
+			logger.debug(`[TypeMapper.mapScalarType] Mapped ${bigQueryType} -> ${harperType}`);
+		} else {
+			logger.warn(`[TypeMapper.mapScalarType] Unsupported type '${bigQueryType}', defaulting to String`);
+		}
+
+		return harperType || 'String';
 	}
 
 	/**
@@ -55,15 +63,25 @@ export class TypeMapper {
 	 * @returns {Object} Harper field definition
 	 */
 	mapField(field) {
+		logger.debug(
+			`[TypeMapper.mapField] Mapping field '${field.name}' (type: ${field.type}, mode: ${field.mode || 'NULLABLE'})`
+		);
+
 		const mode = field.mode || 'NULLABLE';
 		const harperType = this.mapScalarType(field.type);
 
-		return {
+		const result = {
 			name: field.name,
 			type: harperType,
 			required: mode === 'REQUIRED',
 			isArray: mode === 'REPEATED',
 		};
+
+		logger.debug(
+			`[TypeMapper.mapField] Field '${field.name}' mapped to Harper type '${harperType}'${result.isArray ? '[]' : ''}, required: ${result.required}`
+		);
+
+		return result;
 	}
 
 	/**
@@ -73,6 +91,10 @@ export class TypeMapper {
 	 * @returns {Object} Harper attributes object for Operations API
 	 */
 	buildTableAttributes(schema) {
+		logger.info(
+			`[TypeMapper.buildTableAttributes] Building table attributes from ${schema.fields.length} BigQuery fields`
+		);
+
 		const attributes = {};
 
 		for (const field of schema.fields) {
@@ -83,7 +105,13 @@ export class TypeMapper {
 				type,
 				required: mapped.required,
 			};
+
+			logger.debug(
+				`[TypeMapper.buildTableAttributes] Added attribute '${mapped.name}': type=${type}, required=${mapped.required}`
+			);
 		}
+
+		logger.info(`[TypeMapper.buildTableAttributes] Built ${Object.keys(attributes).length} Harper attributes`);
 
 		return attributes;
 	}

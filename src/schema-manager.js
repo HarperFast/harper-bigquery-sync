@@ -33,6 +33,9 @@ export class SchemaManager {
 			timestampColumn: options.config.bigquery.timestampColumn,
 		});
 		this.operationsClient = new OperationsClient(options.config);
+
+		logger.info('[SchemaManager] Initialized with BigQuery client and operations client');
+		logger.debug(`[SchemaManager] Timestamp column configured: ${options.config.bigquery.timestampColumn}`);
 	}
 
 	/**
@@ -52,11 +55,17 @@ export class SchemaManager {
 	 * @returns {Object} Migration plan
 	 */
 	determineMigrationNeeds(harperSchema, bigQuerySchema) {
+		logger.debug('[SchemaManager.determineMigrationNeeds] Analyzing schema differences');
+
 		// Build target attributes from BigQuery schema
 		const targetAttributes = this.typeMapper.buildTableAttributes(bigQuerySchema);
+		logger.debug(
+			`[SchemaManager.determineMigrationNeeds] Target schema has ${Object.keys(targetAttributes).length} attributes`
+		);
 
 		// If table doesn't exist, create it
 		if (!harperSchema) {
+			logger.info('[SchemaManager.determineMigrationNeeds] Table does not exist - will create');
 			return {
 				action: 'create',
 				attributesToAdd: targetAttributes,
@@ -66,10 +75,14 @@ export class SchemaManager {
 		// Find attributes that need to be added
 		const attributesToAdd = {};
 		const existingAttrs = harperSchema.attributes || {};
+		logger.debug(
+			`[SchemaManager.determineMigrationNeeds] Existing schema has ${Object.keys(existingAttrs).length} attributes`
+		);
 
 		for (const [name, targetAttr] of Object.entries(targetAttributes)) {
 			if (!existingAttrs[name]) {
 				// New attribute
+				logger.debug(`[SchemaManager.determineMigrationNeeds] New attribute detected: ${name} (${targetAttr.type})`);
 				attributesToAdd[name] = targetAttr;
 			} else {
 				// Check for type changes
@@ -77,6 +90,9 @@ export class SchemaManager {
 				if (!this.compareTypes(existingAttr.type, targetAttr.type)) {
 					// Type changed - create versioned column
 					const versionedName = `${name}_v2`;
+					logger.warn(
+						`[SchemaManager.determineMigrationNeeds] Type conflict on '${name}': ${existingAttr.type} -> ${targetAttr.type}, creating versioned column ${versionedName}`
+					);
 					attributesToAdd[versionedName] = targetAttr;
 				}
 			}
@@ -84,12 +100,16 @@ export class SchemaManager {
 
 		// Determine action
 		if (Object.keys(attributesToAdd).length === 0) {
+			logger.info('[SchemaManager.determineMigrationNeeds] No schema changes needed');
 			return {
 				action: 'none',
 				attributesToAdd: {},
 			};
 		}
 
+		logger.info(
+			`[SchemaManager.determineMigrationNeeds] Migration needed - adding ${Object.keys(attributesToAdd).length} attributes`
+		);
 		return {
 			action: 'migrate',
 			attributesToAdd,
@@ -109,36 +129,54 @@ export class SchemaManager {
 	 * will be stored and indexed automatically without pre-definition.
 	 */
 	async ensureTable(harperTableName, bigQueryDataset, bigQueryTable, _timestampColumn) {
-		// 1. Check if Harper table exists
-		const harperSchema = await this.operationsClient.describeTable(harperTableName);
+		logger.info(
+			`[SchemaManager.ensureTable] Ensuring table '${harperTableName}' for BigQuery ${bigQueryDataset}.${bigQueryTable}`
+		);
 
-		if (harperSchema) {
-			// Table exists - Harper handles schema evolution automatically
+		try {
+			// 1. Check if Harper table exists
+			logger.debug(`[SchemaManager.ensureTable] Checking if table '${harperTableName}' exists`);
+			const harperSchema = await this.operationsClient.describeTable(harperTableName);
+
+			if (harperSchema) {
+				// Table exists - Harper handles schema evolution automatically
+				logger.info(`[SchemaManager.ensureTable] Table '${harperTableName}' already exists - no action needed`);
+				return {
+					action: 'none',
+					table: harperTableName,
+					message: 'Table exists - Harper will handle any new fields automatically during insert',
+				};
+			}
+
+			// 2. Get BigQuery schema for documentation
+			logger.debug(`[SchemaManager.ensureTable] Fetching BigQuery schema from ${bigQueryDataset}.${bigQueryTable}`);
+			const bqTable = this.bigQueryClient.client.dataset(bigQueryDataset).table(bigQueryTable);
+			const [metadata] = await bqTable.getMetadata();
+			const bigQuerySchema = metadata.schema;
+
+			// Build expected attributes for documentation
+			const expectedAttributes = this.typeMapper.buildTableAttributes(bigQuerySchema);
+			logger.debug(`[SchemaManager.ensureTable] BigQuery schema has ${Object.keys(expectedAttributes).length} fields`);
+
+			// 3. Create table with minimal schema (just primary key)
+			// Harper will auto-index all fields inserted later
+			logger.info(`[SchemaManager.ensureTable] Creating table '${harperTableName}' with id as hash attribute`);
+			await this.operationsClient.createTable(harperTableName, 'id');
+
+			logger.info(
+				`[SchemaManager.ensureTable] Successfully created table '${harperTableName}' - fields will be indexed on insert`
+			);
+
 			return {
-				action: 'none',
+				action: 'created',
 				table: harperTableName,
-				message: 'Table exists - Harper will handle any new fields automatically during insert',
+				hashAttribute: 'id',
+				expectedFields: Object.keys(expectedAttributes),
+				message: 'Table created - all BigQuery fields will be automatically indexed on insert',
 			};
+		} catch (error) {
+			logger.error(`[SchemaManager.ensureTable] Failed to ensure table '${harperTableName}': ${error.message}`);
+			throw error;
 		}
-
-		// 2. Get BigQuery schema for documentation
-		const bqTable = this.bigQueryClient.client.dataset(bigQueryDataset).table(bigQueryTable);
-		const [metadata] = await bqTable.getMetadata();
-		const bigQuerySchema = metadata.schema;
-
-		// Build expected attributes for documentation
-		const expectedAttributes = this.typeMapper.buildTableAttributes(bigQuerySchema);
-
-		// 3. Create table with minimal schema (just primary key)
-		// Harper will auto-index all fields inserted later
-		await this.operationsClient.createTable(harperTableName, 'id');
-
-		return {
-			action: 'created',
-			table: harperTableName,
-			hashAttribute: 'id',
-			expectedFields: Object.keys(expectedAttributes),
-			message: 'Table created - all BigQuery fields will be automatically indexed on insert',
-		};
 	}
 }
