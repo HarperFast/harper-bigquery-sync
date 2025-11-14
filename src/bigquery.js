@@ -16,6 +16,9 @@ class MaritimeBigQueryClient {
 		this.retentionDays = config.retentionDays || parseInt(process.env.RETENTION_DAYS || '30', 10);
 		this.location = config.location || process.env.BIGQUERY_LOCATION || 'US';
 
+		// Streaming insert API option (off by default for backward compatibility)
+		this.useStreamingAPIs = config.useStreamingAPIs || false;
+
 		if (!this.projectId) {
 			throw new Error('projectId must be set in config or GCP_PROJECT_ID environment variable');
 		}
@@ -109,10 +112,94 @@ class MaritimeBigQueryClient {
 	}
 
 	/**
-	 * Insert batch of records into BigQuery using Load Job (free tier compatible)
-	 * Includes retry logic for transient network errors
+	 * Insert batch of records into BigQuery
+	 * Dispatches to streaming or load job API based on configuration
+	 * @param {Array} records - Records to insert
+	 * @param {number} maxRetries - Maximum retry attempts (default: 5)
+	 * @returns {Promise<Object>} - Result with success flag, recordCount, and method
 	 */
 	async insertBatch(records, maxRetries = 5) {
+		if (this.useStreamingAPIs) {
+			return await this._insertStreaming(records, maxRetries);
+		} else {
+			return await this._insertLoadJob(records, maxRetries);
+		}
+	}
+
+	/**
+	 * Insert batch using Streaming Insert API
+	 * Lower latency but has cost implications
+	 * @param {Array} records - Records to insert
+	 * @param {number} maxRetries - Maximum retry attempts (default: 3)
+	 * @returns {Promise<Object>} - Result with success flag, recordCount, and method
+	 */
+	async _insertStreaming(records, maxRetries = 3) {
+		if (!records || records.length === 0) {
+			throw new Error('No records to insert');
+		}
+
+		let lastError;
+
+		for (let attempt = 1; attempt <= maxRetries; attempt++) {
+			try {
+				// BigQuery streaming insert API
+				await this.table.insert(records, {
+					skipInvalidRows: false,
+					ignoreUnknownValues: false,
+				});
+
+				// Success
+				return {
+					success: true,
+					recordCount: records.length,
+					method: 'streaming',
+				};
+			} catch (error) {
+				lastError = error;
+
+				// Handle partial failures
+				if (error.name === 'PartialFailureError') {
+					console.error('Partial failure - some rows failed to insert:', error.errors);
+
+					// Log failed rows for debugging
+					error.errors.forEach((err, index) => {
+						console.error(`Row ${index} failed:`, err);
+					});
+
+					throw new Error(`Partial failure: ${error.errors.length} rows failed`);
+				}
+
+				// Check if this is a retryable error
+				const isRetryable =
+					error.code === 429 || // Quota exceeded
+					error.code === 503 || // Service unavailable
+					(error.code >= 500 && error.code < 600); // Server errors
+
+				if (!isRetryable || attempt === maxRetries) {
+					throw error;
+				}
+
+				// Exponential backoff: 1s, 2s, 4s
+				const backoffMs = Math.pow(2, attempt - 1) * 1000;
+				console.log(`Streaming insert failed (attempt ${attempt}/${maxRetries}): ${error.message}`);
+				console.log(`Retrying in ${backoffMs / 1000}s...`);
+
+				await new Promise((resolve) => setTimeout(resolve, backoffMs));
+			}
+		}
+
+		// Should never reach here, but just in case
+		throw lastError;
+	}
+
+	/**
+	 * Insert batch using Load Job API (free tier compatible)
+	 * Includes retry logic for transient network errors
+	 * @param {Array} records - Records to insert
+	 * @param {number} maxRetries - Maximum retry attempts (default: 5)
+	 * @returns {Promise<Object>} - Result with success flag, recordCount, and method
+	 */
+	async _insertLoadJob(records, maxRetries = 5) {
 		if (!records || records.length === 0) {
 			throw new Error('No records to insert');
 		}
@@ -146,6 +233,7 @@ class MaritimeBigQueryClient {
 					return {
 						success: true,
 						recordCount: records.length,
+						method: 'load_job',
 					};
 				} catch (loadError) {
 					lastError = loadError;

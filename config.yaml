@@ -55,6 +55,8 @@ bigquery:
         initialBatchSize: 5000
         catchupBatchSize: 500
         steadyBatchSize: 100
+      # Optional: Enable streaming inserts for lower latency (has cost implications)
+      # useStreamingAPIs: true
 
     # Vessel metadata updates
     - id: vessel_metadata
@@ -67,6 +69,25 @@ bigquery:
         initialBatchSize: 1000
         catchupBatchSize: 100
         steadyBatchSize: 10
+
+# BigQuery Insert Method Configuration
+# Two options available (configurable per table):
+#
+# 1. Load Job API (default):
+#    - Free tier compatible (no per-row costs)
+#    - Higher latency (seconds to minutes)
+#    - Best for: development, batch workloads, cost-sensitive deployments
+#    - Set useStreamingAPIs: false (or omit)
+#
+# 2. Streaming Insert API:
+#    - Lower latency (sub-second to few seconds)
+#    - Costs: $0.01 per 200 MB (minimum $0.01/day)
+#    - Best for: production, real-time dashboards, low-latency requirements
+#    - Set useStreamingAPIs: true
+#
+# Example: Enable streaming for time-sensitive events
+#   - id: port_events
+#     useStreamingAPIs: true  # Real-time events benefit from low latency
 
 # Maritime vessel data synthesizer configuration
 # When bigquery.tables is present, synthesizer uses multi-table orchestrator
