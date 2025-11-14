@@ -97,54 +97,48 @@ export class SchemaManager {
 	}
 
 	/**
-	 * Ensures a Harper table exists and matches BigQuery schema
+	 * Ensures a Harper table exists for BigQuery data
 	 * @param {string} harperTableName - Harper table name
-	 * @param {string} bigQueryDataset - BigQuery dataset
-	 * @param {string} bigQueryTable - BigQuery table name
+	 * @param {string} bigQueryDataset - BigQuery dataset (for documentation)
+	 * @param {string} bigQueryTable - BigQuery table name (for documentation)
 	 * @param {string} _timestampColumn - Timestamp column name (for future use)
 	 * @returns {Promise<Object>} Result of ensure operation
+	 *
+	 * Note: Harper automatically indexes all fields in schemaless tables.
+	 * Simply create the table once, then insert BigQuery data - all fields
+	 * will be stored and indexed automatically without pre-definition.
 	 */
 	async ensureTable(harperTableName, bigQueryDataset, bigQueryTable, _timestampColumn) {
-		// 1. Get BigQuery schema
+		// 1. Check if Harper table exists
+		const harperSchema = await this.operationsClient.describeTable(harperTableName);
+
+		if (harperSchema) {
+			// Table exists - Harper handles schema evolution automatically
+			return {
+				action: 'none',
+				table: harperTableName,
+				message: 'Table exists - Harper will handle any new fields automatically during insert',
+			};
+		}
+
+		// 2. Get BigQuery schema for documentation
 		const bqTable = this.bigQueryClient.client.dataset(bigQueryDataset).table(bigQueryTable);
 		const [metadata] = await bqTable.getMetadata();
 		const bigQuerySchema = metadata.schema;
 
-		// 2. Check if Harper table exists
-		const harperSchema = await this.operationsClient.describeTable(harperTableName);
+		// Build expected attributes for documentation
+		const expectedAttributes = this.typeMapper.buildTableAttributes(bigQuerySchema);
 
-		// 3. Determine what needs to be done
-		const migration = this.determineMigrationNeeds(harperSchema, bigQuerySchema);
+		// 3. Create table with minimal schema (just primary key)
+		// Harper will auto-index all fields inserted later
+		await this.operationsClient.createTable(harperTableName, 'id');
 
-		// 4. Execute migration
-		if (migration.action === 'create') {
-			// Create new table with all attributes
-			const indexes = this.indexStrategy.getIndexes(bigQuerySchema.fields);
-			await this.operationsClient.createTable(harperTableName, migration.attributesToAdd, indexes);
-
-			return {
-				action: 'created',
-				table: harperTableName,
-				attributes: Object.keys(migration.attributesToAdd),
-				indexes,
-			};
-		}
-
-		if (migration.action === 'migrate') {
-			// Add new attributes to existing table
-			await this.operationsClient.addAttributes(harperTableName, migration.attributesToAdd);
-
-			return {
-				action: 'migrated',
-				table: harperTableName,
-				attributesAdded: Object.keys(migration.attributesToAdd),
-			};
-		}
-
-		// No changes needed
 		return {
-			action: 'none',
+			action: 'created',
 			table: harperTableName,
+			hashAttribute: 'id',
+			expectedFields: Object.keys(expectedAttributes),
+			message: 'Table created - all BigQuery fields will be automatically indexed on insert',
 		};
 	}
 }

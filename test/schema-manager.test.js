@@ -184,16 +184,14 @@ describe('SchemaManager', () => {
 
 			let describedTable = null;
 			let createdTable = null;
-			let createdAttributes = null;
-			let createdIndexes = null;
+			let createdHashAttribute = null;
 
 			const mockOperationsClient = {
 				describeTable: async () => describedTable,
-				createTable: async (table, attributes, indexes) => {
+				createTable: async (table, hashAttribute) => {
 					createdTable = table;
-					createdAttributes = attributes;
-					createdIndexes = indexes;
-					return { created: true };
+					createdHashAttribute = hashAttribute;
+					return { success: true };
 				},
 			};
 
@@ -209,93 +207,18 @@ describe('SchemaManager', () => {
 
 			assert.strictEqual(result.action, 'created');
 			assert.strictEqual(createdTable, 'TestTable');
-			assert.deepStrictEqual(createdAttributes, {
-				id: { type: 'String', required: true },
-				name: { type: 'String', required: false },
-			});
-			assert.ok(Array.isArray(createdIndexes));
+			assert.strictEqual(createdHashAttribute, 'id');
+			assert.ok(result.expectedFields);
+			assert.ok(Array.isArray(result.expectedFields));
 		});
 
-		it('should add new columns when table exists but schema changed', async () => {
-			const mockBigQueryTable = {
-				getMetadata: async () => [
-					{
-						schema: {
-							fields: [
-								{ name: 'id', type: 'STRING', mode: 'REQUIRED' },
-								{ name: 'email', type: 'STRING', mode: 'NULLABLE' },
-							],
-						},
-					},
-				],
-			};
-
-			const mockDataset = {
-				table: () => mockBigQueryTable,
-			};
-
-			const mockBigQueryClient = {
-				client: {
-					dataset: () => mockDataset,
-				},
-			};
-
+		it('should return no-op when table exists (Harper handles schema evolution)', async () => {
 			const existingSchema = {
-				attributes: {
-					id: { type: 'String', required: true },
-				},
-			};
-
-			let addedAttributes = null;
-
-			const mockOperationsClient = {
-				describeTable: async () => existingSchema,
-				addAttributes: async (table, attributes) => {
-					addedAttributes = attributes;
-					return { added: true };
-				},
-			};
-
-			const manager = new SchemaManager({
-				bigQueryClient: mockBigQueryClient,
-				config: { bigquery: { timestampColumn: 'timestamp' } },
-			});
-
-			manager.operationsClient = mockOperationsClient;
-
-			const result = await manager.ensureTable('TestTable', 'test_dataset', 'test_table', 'timestamp');
-
-			assert.strictEqual(result.action, 'migrated');
-			assert.deepStrictEqual(addedAttributes, {
-				email: { type: 'String', required: false },
-			});
-		});
-
-		it('should return no-op when schemas match', async () => {
-			const mockBigQueryTable = {
-				getMetadata: async () => [
-					{
-						schema: {
-							fields: [{ name: 'id', type: 'STRING', mode: 'REQUIRED' }],
-						},
-					},
+				name: 'TestTable',
+				attributes: [
+					{ attribute: 'id', is_primary_key: true },
+					{ attribute: 'name', indexed: true },
 				],
-			};
-
-			const mockDataset = {
-				table: () => mockBigQueryTable,
-			};
-
-			const mockBigQueryClient = {
-				client: {
-					dataset: () => mockDataset,
-				},
-			};
-
-			const existingSchema = {
-				attributes: {
-					id: { type: 'String', required: true },
-				},
 			};
 
 			const mockOperationsClient = {
@@ -303,7 +226,7 @@ describe('SchemaManager', () => {
 			};
 
 			const manager = new SchemaManager({
-				bigQueryClient: mockBigQueryClient,
+				bigQueryClient: {},
 				config: { bigquery: { timestampColumn: 'timestamp' } },
 			});
 
@@ -312,6 +235,8 @@ describe('SchemaManager', () => {
 			const result = await manager.ensureTable('TestTable', 'test_dataset', 'test_table', 'timestamp');
 
 			assert.strictEqual(result.action, 'none');
+			assert.strictEqual(result.table, 'TestTable');
+			assert.ok(result.message.includes('automatically'));
 		});
 	});
 });

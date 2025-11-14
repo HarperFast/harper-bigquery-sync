@@ -4,6 +4,7 @@
 
 /* global tables */
 
+import { createHash } from 'crypto';
 import { BigQueryClient } from './bigquery-client.js';
 import { globals as _globals } from './globals.js';
 import { convertBigQueryTypes } from './type-converter.js';
@@ -311,14 +312,20 @@ export class SyncEngine {
 					continue;
 				}
 
-				// Remove 'id' field from BigQuery data if it exists (not needed since transaction_date is the primary key)
-				const { id: _unusedId, ...cleanedRecord } = convertedRecord;
+				// Generate deterministic integer ID for fast indexing
+				// Use hash of timestamp + deterministic fields for uniqueness
+				const timestamp = convertedRecord[timestampColumn];
+				const hashInput = `${timestamp}-${JSON.stringify(convertedRecord)}`;
+				const hash = createHash('sha256').update(hashInput).digest();
+				// Convert first 8 bytes of hash to positive integer within safe range
+				const bigIntId = hash.readBigInt64BE(0);
+				const id = Number(bigIntId < 0n ? -bigIntId : bigIntId) % Number.MAX_SAFE_INTEGER;
 
-				// Store BigQuery record as-is with metadata
-				// transaction_date is the primary key (defined in schema)
+				// Store BigQuery record with integer ID for fast indexing
 				const mappedRecord = {
-					...cleanedRecord, // All BigQuery fields at top level (timestamps converted to Date objects)
-					_syncedAt: new Date(), // Add sync timestamp as Date object
+					id, // Integer primary key for fast indexing
+					...convertedRecord, // All BigQuery fields at top level
+					_syncedAt: new Date(), // Add sync timestamp
 				};
 
 				validRecords.push(mappedRecord);

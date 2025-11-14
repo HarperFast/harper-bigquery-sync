@@ -57,7 +57,18 @@ export class OperationsClient {
 			body: JSON.stringify(operation),
 		});
 
-		const data = await response.json();
+		// Get response text first for better error handling
+		const text = await response.text();
+		let data;
+
+		try {
+			data = JSON.parse(text);
+		} catch {
+			const error = new Error(`Invalid JSON response: ${text.substring(0, 200)}`);
+			error.statusCode = response.status;
+			error.responseText = text;
+			throw error;
+		}
 
 		// Harper returns error in response body, not HTTP status
 		if (data.error) {
@@ -128,47 +139,27 @@ export class OperationsClient {
 	}
 
 	/**
-	 * Creates a new table
+	 * Creates a new table with minimal schema
 	 * @param {string} tableName - Table name
-	 * @param {Object} attributes - Attribute definitions
-	 * @param {Array<string>} indexes - Columns to index
+	 * @param {string} [hashAttribute='id'] - Primary key attribute name
 	 * @returns {Promise<Object>} Creation result
+	 *
+	 * Note: Harper automatically indexes all fields in schemaless tables.
+	 * You can insert any fields during data ingestion - they will be stored
+	 * and indexed automatically without pre-defining them.
 	 */
-	async createTable(tableName, attributes, indexes = []) {
+	async createTable(tableName, hashAttribute = 'id') {
 		try {
-			// Build the create_table operation payload
-			const operation = {
+			const result = await this.makeRequest({
 				operation: 'create_table',
 				table: tableName,
-				hash_attribute: 'id', // Default primary key
-			};
-
-			// Add attributes if provided
-			if (attributes && Object.keys(attributes).length > 0) {
-				operation.attributes = attributes;
-			}
-
-			const result = await this.makeRequest(operation);
-
-			// Create indexes if specified
-			if (indexes && indexes.length > 0) {
-				for (const indexColumn of indexes) {
-					try {
-						await this.makeRequest({
-							operation: 'create_attribute_index',
-							table: tableName,
-							attribute: indexColumn,
-						});
-					} catch (indexError) {
-						// Log but don't fail if index creation fails
-						console.warn(`Failed to create index on ${indexColumn}:`, indexError.message);
-					}
-				}
-			}
+				hash_attribute: hashAttribute,
+			});
 
 			return {
 				success: true,
 				table: tableName,
+				hashAttribute,
 				message: result.message || 'Table created successfully',
 			};
 		} catch (error) {
@@ -177,6 +168,7 @@ export class OperationsClient {
 				return {
 					success: true,
 					table: tableName,
+					hashAttribute,
 					message: 'Table already exists',
 					alreadyExists: true,
 				};
@@ -186,49 +178,25 @@ export class OperationsClient {
 	}
 
 	/**
-	 * Adds attributes to an existing table
-	 * @param {string} tableName - Table name
-	 * @param {Object} attributes - New attribute definitions
-	 * @returns {Promise<Object>} Result
+	 * Note: Harper does not support ALTER operations via Operations API.
+	 * However, tables created with just hash_attribute automatically accept
+	 * any fields during INSERT operations. All inserted fields are automatically
+	 * stored and indexed.
+	 *
+	 * This method is kept for API compatibility but is not needed in practice.
+	 * Simply insert records with the desired fields and Harper will handle them.
+	 *
+	 * @deprecated Harper handles schema evolution automatically via schemaless inserts
+	 * @param {string} _tableName - Table name
+	 * @param {Object} _attributes - Attribute definitions (not used)
+	 * @returns {Promise<Object>} Result indicating no action needed
 	 */
-	async addAttributes(tableName, attributes) {
-		// Harper DB doesn't have a bulk add_attributes operation
-		// We need to add each attribute individually using alter table
-		const results = [];
-		const errors = [];
-
-		for (const [attrName, attrDef] of Object.entries(attributes)) {
-			try {
-				await this.makeRequest({
-					operation: 'alter',
-					table: tableName,
-					operation_type: 'add_attribute',
-					attribute: attrName,
-					...attrDef, // Spread type, required, etc.
-				});
-				results.push(attrName);
-			} catch (error) {
-				// If attribute already exists, consider it success
-				if (this.isAttributeExistsError(error)) {
-					results.push(attrName);
-				} else {
-					errors.push({ attribute: attrName, error: error.message });
-				}
-			}
-		}
-
-		// If any errors occurred that weren't "already exists", throw
-		if (errors.length > 0) {
-			const error = new Error(`Failed to add some attributes: ${errors.map((e) => e.attribute).join(', ')}`);
-			error.details = errors;
-			throw error;
-		}
-
+	async addAttributes(_tableName, _attributes) {
+		// No-op: Harper handles this automatically
 		return {
 			success: true,
-			table: tableName,
-			attributesAdded: results,
-			message: `Added ${results.length} attribute(s)`,
+			message: 'Harper handles schema evolution automatically - no explicit addAttributes needed',
+			note: 'Simply insert records with new fields and Harper will store and index them automatically',
 		};
 	}
 }
